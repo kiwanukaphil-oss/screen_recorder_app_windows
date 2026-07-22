@@ -1,37 +1,40 @@
+using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using Recorder.Common.Timing;
 
 namespace Recorder.Audio;
 
 /// <summary>
-/// Captures everything the default render device plays (WASAPI loopback) as 32-bit
-/// float PCM in the device's mix format. NAudio is used for M1 pragmatism; if M2's
-/// sync measurements demand tighter timestamp control, this is the one class to
-/// replace with direct WASAPI interop — its callback contract already matches.
+/// Captures the default microphone via WASAPI (shared mode, event-driven) as 32-bit
+/// float in the device mix format. Unlike loopback, a live microphone delivers data
+/// continuously (room noise is still data), but the session applies the same
+/// gap-fill safety net regardless.
 /// </summary>
-public sealed class SystemAudioLoopbackSource : IAudioCaptureSource
+public sealed class MicrophoneCaptureSource : IAudioCaptureSource
 {
-    private readonly WasapiLoopbackCapture _capture;
+    private readonly WasapiCapture _capture;
     private AudioChunkCallback? _onChunk;
 
     public int SampleRate { get; }
     public int Channels { get; }
     public int BytesPerSecond { get; }
-    public string DisplayName => "System audio";
+    public string DisplayName { get; }
 
-    public SystemAudioLoopbackSource()
+    public MicrophoneCaptureSource()
     {
-        _capture = new WasapiLoopbackCapture();
+        _capture = new WasapiCapture();
+        _capture.WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(
+            _capture.WaveFormat.SampleRate, _capture.WaveFormat.Channels);
         SampleRate = _capture.WaveFormat.SampleRate;
         Channels = _capture.WaveFormat.Channels;
         BytesPerSecond = _capture.WaveFormat.AverageBytesPerSecond;
+
+        using var enumerator = new MMDeviceEnumerator();
+        using MMDevice device = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+        DisplayName = device.FriendlyName;
     }
 
-    /// <summary>
-    /// Starts loopback capture. The chunk's start time is derived by subtracting the
-    /// chunk's own duration from the arrival time — WASAPI delivered these samples
-    /// because they just finished playing, so arrival ≈ end of chunk.
-    /// </summary>
+    /// <summary>Chunk start time = arrival minus the chunk's own duration (same rule as loopback).</summary>
     public void Start(AudioChunkCallback onChunk)
     {
         _onChunk = onChunk;
@@ -47,7 +50,7 @@ public sealed class SystemAudioLoopbackSource : IAudioCaptureSource
     public void Stop()
     {
         _onChunk = null;
-        if (_capture.CaptureState is not NAudio.CoreAudioApi.CaptureState.Stopped)
+        if (_capture.CaptureState is not CaptureState.Stopped)
         {
             _capture.StopRecording();
         }

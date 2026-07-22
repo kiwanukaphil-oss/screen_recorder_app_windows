@@ -21,21 +21,29 @@ public sealed class Mp4SinkWriter : IDisposable
     private const uint H264ProfileHigh = 100; // eAVEncH264VProfile_High
     private const int AacBytesPerSecond = 24_000; // 192 kbps stereo, an allowed MF AAC encoder rate
 
+    /// <summary>Codec properties actually accepted by the encoder, for logs/diagnostics.</summary>
+    public string AppliedEncoderProperties { get; private set; } = "encoder defaults";
+
     private readonly IMFDXGIDeviceManager _deviceManager;
     private readonly IMFSinkWriter _writer;
     private readonly int _videoStreamIndex;
-    private readonly int _audioStreamIndex = -1;
+    private readonly int[] _audioStreamIndices;
     private readonly long _videoFrameDuration100Ns;
-    private readonly AudioInputFormat? _audioFormat;
+    private readonly AudioInputFormat[] _audioFormats;
     private bool _finalized;
 
     public VideoEncodingConfig VideoConfig { get; }
 
-    public Mp4SinkWriter(string outputPath, ID3D11Device device, VideoEncodingConfig video, AudioInputFormat? audio)
+    /// <summary>
+    /// Each entry in <paramref name="audioTracks"/> becomes its own AAC track in the
+    /// MP4 (track 0 first). Editors can then mix/mute system audio and microphone
+    /// independently — the roadmap's "separate audio tracks" requirement.
+    /// </summary>
+    public Mp4SinkWriter(string outputPath, ID3D11Device device, VideoEncodingConfig video, params AudioInputFormat[] audioTracks)
     {
         MediaFoundationRuntime.AddRef();
         VideoConfig = video;
-        _audioFormat = audio;
+        _audioFormats = audioTracks;
         _videoFrameDuration100Ns = 10_000_000L / video.FramesPerSecond;
 
         _deviceManager = MediaFactory.MFCreateDXGIDeviceManager();
@@ -48,13 +56,22 @@ public sealed class Mp4SinkWriter : IDisposable
         // bounded queue upstream is the pacing mechanism, so writing must never block.
         writerAttributes.Set(SinkWriterAttributeKeys.DisableThrottling, 1u);
 
+        // Encoder properties passed at creation time. Note: the NVENC MFT (driver
+        // 576.x, RTX 3090) enforces a 1-second GOP regardless of this store, the
+        // media-type MaxKeyframeSpacing, and ICodecAPI — all three are still set
+        // because AMF/QSV/software encoders are expected to honor at least one.
+        using IMFAttributes encoderConfig = MediaFactory.MFCreateAttributes(1);
+        encoderConfig.Set(CodecApi.GopSize, (uint)(video.KeyframeIntervalSeconds * video.FramesPerSecond));
+        writerAttributes.Set(SinkWriterAttributeKeys.EncoderConfig, encoderConfig);
+
         _writer = MediaFactory.MFCreateSinkWriterFromURL(outputPath, null, writerAttributes);
 
         _videoStreamIndex = AddVideoStream(video);
-        if (audio is not null)
-        {
-            _audioStreamIndex = AddAudioStream(audio);
-        }
+        _audioStreamIndices = _audioFormats.Select(AddAudioStream).ToArray();
+
+        // The encoder MFT exists once the input type is set; codec properties must be
+        // applied before BeginWriting for most encoders to honor them.
+        ApplyEncoderProperties(video);
 
         _writer.BeginWriting();
     }
@@ -70,13 +87,23 @@ public sealed class Mp4SinkWriter : IDisposable
     {
         using IMFMediaType outputType = MediaFactory.MFCreateMediaType();
         outputType.Set(MediaTypeAttributeKeys.MajorType, MediaTypeGuids.Video);
-        outputType.Set(MediaTypeAttributeKeys.Subtype, VideoFormatGuids.H264);
+        outputType.Set(MediaTypeAttributeKeys.Subtype,
+            video.Codec == VideoCodec.Hevc ? VideoFormatGuids.Hevc : VideoFormatGuids.H264);
         outputType.Set(MediaTypeAttributeKeys.AvgBitrate, (uint)video.BitrateBitsPerSecond);
         outputType.Set(MediaTypeAttributeKeys.InterlaceMode, InterlaceModeProgressive);
         outputType.Set(MediaTypeAttributeKeys.FrameSize, Pack(video.Width, video.Height));
         outputType.Set(MediaTypeAttributeKeys.FrameRate, Pack(video.FramesPerSecond, 1));
         outputType.Set(MediaTypeAttributeKeys.PixelAspectRatio, Pack(1, 1));
-        outputType.Set(MediaTypeAttributeKeys.Mpeg2Profile, H264ProfileHigh);
+        // Declared on the media type as well as via ICodecAPI: some encoder MFTs
+        // (NVENC among them) reset ICodecAPI GOP during BeginWriting negotiation,
+        // but honor the media-type attribute.
+        outputType.Set(MediaTypeAttributeKeys.MaxKeyframeSpacing,
+            (uint)(video.KeyframeIntervalSeconds * video.FramesPerSecond));
+        if (video.Codec == VideoCodec.H264)
+        {
+            // HEVC MFTs choose their own profile; forcing one is rejected by some vendors.
+            outputType.Set(MediaTypeAttributeKeys.Mpeg2Profile, H264ProfileHigh);
+        }
         int streamIndex = _writer.AddStream(outputType);
 
         using IMFMediaType inputType = MediaFactory.MFCreateMediaType();
@@ -126,6 +153,68 @@ public sealed class Mp4SinkWriter : IDisposable
     }
 
     /// <summary>
+    /// Applies rate-control mode, quality and GOP size to the encoder MFT through
+    /// ICodecAPI. Every property is best-effort: vendor MFTs and the software fallback
+    /// support different subsets, and an unsupported knob must degrade to encoder
+    /// defaults rather than fail the recording. What was actually accepted is recorded
+    /// in <see cref="AppliedEncoderProperties"/> for the session log.
+    /// </summary>
+    private void ApplyEncoderProperties(VideoEncodingConfig video)
+    {
+        IntPtr codecApiPointer;
+        try
+        {
+            codecApiPointer = _writer.GetServiceForStream(_videoStreamIndex, Guid.Empty, typeof(CodecApi.ICodecAPI).GUID);
+        }
+        catch (SharpGenException)
+        {
+            AppliedEncoderProperties = "encoder defaults (ICodecAPI unavailable)";
+            return;
+        }
+
+        var applied = new List<string>();
+        try
+        {
+            var codecApi = (CodecApi.ICodecAPI)Marshal.GetObjectForIUnknown(codecApiPointer);
+
+            uint? mode = video.RateControl switch
+            {
+                RateControlMode.Cbr => CodecApi.ModeCbr,
+                RateControlMode.Vbr => CodecApi.ModePeakConstrainedVbr,
+                RateControlMode.ConstantQuality => CodecApi.ModeQuality,
+                _ => null,
+            };
+            if (mode is uint modeValue && CodecApi.TrySetUInt32(codecApi, CodecApi.RateControlMode, modeValue))
+            {
+                applied.Add($"rate-control={video.RateControl}");
+
+                if (video.RateControl == RateControlMode.ConstantQuality &&
+                    CodecApi.TrySetUInt32(codecApi, CodecApi.Quality, (uint)Math.Clamp(video.QualityLevel, 1, 100)))
+                {
+                    applied.Add($"quality={video.QualityLevel}");
+                }
+                if (video.RateControl is RateControlMode.Cbr or RateControlMode.Vbr &&
+                    CodecApi.TrySetUInt32(codecApi, CodecApi.MeanBitRate, (uint)video.BitrateBitsPerSecond))
+                {
+                    applied.Add($"mean-bitrate={video.BitrateBitsPerSecond}");
+                }
+            }
+
+            uint gopFrames = (uint)(video.KeyframeIntervalSeconds * video.FramesPerSecond);
+            if (gopFrames > 0 && CodecApi.TrySetUInt32(codecApi, CodecApi.GopSize, gopFrames))
+            {
+                applied.Add($"gop={gopFrames}f");
+            }
+        }
+        finally
+        {
+            Marshal.Release(codecApiPointer);
+        }
+
+        AppliedEncoderProperties = applied.Count > 0 ? string.Join(", ", applied) : "encoder defaults";
+    }
+
+    /// <summary>
     /// Submits one BGRA GPU texture as a video sample. The DXGI surface buffer wraps
     /// the texture by reference (no copy) and Media Foundation keeps the texture alive
     /// via COM ref-counting until the encoder has consumed it, so the caller may
@@ -152,12 +241,13 @@ public sealed class Mp4SinkWriter : IDisposable
     }
 
     /// <summary>
-    /// Submits a chunk of float-PCM audio. Bytes are copied into an MF memory buffer
-    /// (audio volume is tiny next to video, so this copy is irrelevant to performance).
+    /// Submits a chunk of float-PCM audio to the given track (index into the
+    /// constructor's audioTracks). Bytes are copied into an MF memory buffer (audio
+    /// volume is tiny next to video, so this copy is irrelevant to performance).
     /// </summary>
-    public void WriteAudioChunk(byte[] pcmData, int byteCount, long timestamp100Ns)
+    public void WriteAudioChunk(int track, byte[] pcmData, int byteCount, long timestamp100Ns)
     {
-        if (_audioStreamIndex < 0 || byteCount == 0)
+        if (track < 0 || track >= _audioStreamIndices.Length || byteCount == 0)
         {
             return;
         }
@@ -177,8 +267,8 @@ public sealed class Mp4SinkWriter : IDisposable
         using IMFSample sample = MediaFactory.MFCreateSample();
         sample.AddBuffer(buffer);
         sample.SampleTime = timestamp100Ns;
-        sample.SampleDuration = byteCount * 10_000_000L / _audioFormat!.BytesPerSecond;
-        _writer.WriteSample(_audioStreamIndex, sample);
+        sample.SampleDuration = byteCount * 10_000_000L / _audioFormats[track].BytesPerSecond;
+        _writer.WriteSample(_audioStreamIndices[track], sample);
     }
 
     /// <summary>Flushes pending samples and writes the MP4 moov box. Must be called before Dispose.</summary>

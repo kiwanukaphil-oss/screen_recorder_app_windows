@@ -21,6 +21,17 @@ public sealed class RecorderSettings
 
     public VideoCodecPreference Codec { get; set; } = VideoCodecPreference.H264;
 
+    /// <summary>Target bitrate in kbps; null = automatic from resolution/fps/codec.</summary>
+    public int? VideoBitrateKbps { get; set; }
+
+    /// <summary>"default" | "cbr" | "vbr" | "cq" — parsed case-insensitively.</summary>
+    public string RateControl { get; set; } = "default";
+
+    /// <summary>1–100, used only in constant-quality mode.</summary>
+    public int QualityLevel { get; set; } = 70;
+
+    public int KeyframeIntervalSeconds { get; set; } = 2;
+
     public bool CaptureCursor { get; set; } = true;
 
     public bool VerboseLogging { get; set; }

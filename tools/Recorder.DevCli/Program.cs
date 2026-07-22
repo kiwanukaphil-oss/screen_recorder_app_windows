@@ -18,11 +18,30 @@ internal static class Program
         int? seconds = ReadIntOption(args, "--seconds");
         int monitorIndex = ReadIntOption(args, "--monitor") ?? 0;
         bool recordAudio = !args.Contains("--no-audio");
+        bool recordMicrophone = args.Contains("--mic");
 
         var settings = new RecorderSettings();
         if (ReadIntOption(args, "--fps") is int fps)
         {
             settings.FramesPerSecond = fps;
+        }
+        if (ReadStringOption(args, "--codec") is string codec)
+        {
+            settings.Codec = codec.Equals("hevc", StringComparison.OrdinalIgnoreCase)
+                ? VideoCodecPreference.Hevc
+                : VideoCodecPreference.H264;
+        }
+        if (ReadStringOption(args, "--rate") is string rate)
+        {
+            settings.RateControl = rate;
+        }
+        if (ReadIntOption(args, "--bitrate") is int bitrateKbps)
+        {
+            settings.VideoBitrateKbps = bitrateKbps;
+        }
+        if (ReadIntOption(args, "--quality") is int quality)
+        {
+            settings.QualityLevel = quality;
         }
         string outputDirectory = ReadStringOption(args, "--output") ?? settings.OutputDirectory;
         Directory.CreateDirectory(outputDirectory);
@@ -42,7 +61,7 @@ internal static class Program
 
         try
         {
-            RunRecording(settings, monitors[monitorIndex], outputFile, recordAudio, seconds, log);
+            RunRecording(settings, monitors[monitorIndex], outputFile, recordAudio, recordMicrophone, seconds, log);
             return 0;
         }
         catch (Exception ex)
@@ -63,13 +82,15 @@ internal static class Program
         MonitorInfo monitor,
         string outputFile,
         bool recordAudio,
+        bool recordMicrophone,
         int? seconds,
         Logger log)
     {
         using var graphicsDevice = new D3D11GraphicsDevice();
         log.Information("GPU: {Adapter}", graphicsDevice.GetAdapterDescription());
 
-        using var session = new RecordingSession(graphicsDevice, settings, monitor, outputFile, log, recordAudio);
+        using var session = new RecordingSession(
+            graphicsDevice, settings, monitor, outputFile, log, recordAudio, recordMicrophone);
         using var stopSignal = new ManualResetEventSlim();
         using var hotkey = new GlobalStopHotkey(stopSignal.Set);
         log.Information(hotkey.RegistrationSucceeded
