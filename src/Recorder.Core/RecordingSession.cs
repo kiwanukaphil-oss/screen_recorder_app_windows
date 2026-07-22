@@ -156,7 +156,7 @@ public sealed class RecordingSession : IDisposable
 
     private readonly ILogger _log;
     private readonly D3D11GraphicsDevice _graphicsDevice;
-    private readonly ContinuousMonitorCaptureSource _captureSource;
+    private readonly ContinuousCaptureSource _captureSource;
     private readonly List<AudioTrackPipeline> _audioTracks = new();
     private readonly BoundedFrameQueue<PendingVideoFrame> _videoQueue = new(VideoQueueCapacity);
     private readonly SemaphoreSlim _workAvailable = new(0);
@@ -203,6 +203,7 @@ public sealed class RecordingSession : IDisposable
     /// </summary>
     public long BaseTimestamp100Ns => _baseTimestamp100Ns;
 
+    /// <summary>Records a monitor.</summary>
     public RecordingSession(
         D3D11GraphicsDevice graphicsDevice,
         RecorderSettings settings,
@@ -211,12 +212,40 @@ public sealed class RecordingSession : IDisposable
         ILogger log,
         bool recordSystemAudio = true,
         bool recordMicrophone = false)
+        : this(graphicsDevice, settings,
+               ContinuousCaptureSource.ForMonitor(graphicsDevice, monitor, settings.CaptureCursor),
+               outputFilePath, log, recordSystemAudio, recordMicrophone)
+    {
+    }
+
+    /// <summary>Records a single window.</summary>
+    public RecordingSession(
+        D3D11GraphicsDevice graphicsDevice,
+        RecorderSettings settings,
+        CapturableWindow window,
+        string outputFilePath,
+        ILogger log,
+        bool recordSystemAudio = true,
+        bool recordMicrophone = false)
+        : this(graphicsDevice, settings,
+               ContinuousCaptureSource.ForWindow(graphicsDevice, window, settings.CaptureCursor),
+               outputFilePath, log, recordSystemAudio, recordMicrophone)
+    {
+    }
+
+    private RecordingSession(
+        D3D11GraphicsDevice graphicsDevice,
+        RecorderSettings settings,
+        ContinuousCaptureSource captureSource,
+        string outputFilePath,
+        ILogger log,
+        bool recordSystemAudio,
+        bool recordMicrophone)
     {
         _log = log;
         _graphicsDevice = graphicsDevice;
         OutputFilePath = outputFilePath;
-
-        _captureSource = new ContinuousMonitorCaptureSource(graphicsDevice, monitor, settings.CaptureCursor);
+        _captureSource = captureSource;
 
         var sources = new List<(IAudioCaptureSource Source, float Gain)>();
         if (recordSystemAudio)
@@ -291,7 +320,8 @@ public sealed class RecordingSession : IDisposable
         };
 
         _log.Information(
-            "Recording session: {Width}x{Height}@{Fps} {Codec} ~{Mbps:0.#} Mbps [{EncoderProps}], audio tracks [{Audio}] -> {File}",
+            "Recording session ({Source}): {Width}x{Height}@{Fps} {Codec} ~{Mbps:0.#} Mbps [{EncoderProps}], audio tracks [{Audio}] -> {File}",
+            _captureSource.SourceLabel,
             videoConfig.Width, videoConfig.Height, videoConfig.FramesPerSecond,
             videoConfig.Codec,
             videoConfig.BitrateBitsPerSecond / 1_000_000.0,
@@ -338,9 +368,10 @@ public sealed class RecordingSession : IDisposable
 
         _log.Information(
             "Recording finished: WGC delivered {Delivered}, pacer rejected {Rejected}, queue dropped {Dropped}, " +
-            "written {Frames}; audio chunks {Chunks}, silence gaps {Gaps}",
+            "written {Frames}; audio chunks {Chunks}, silence gaps {Gaps}, source resizes {Resizes}",
             _captureSource.FramesDelivered, Statistics.FramesRejectedByPacer, Statistics.FramesDropped,
-            Statistics.FramesWritten, Statistics.AudioChunksWritten, Statistics.SilenceGapsFilled);
+            Statistics.FramesWritten, Statistics.AudioChunksWritten, Statistics.SilenceGapsFilled,
+            _captureSource.SourceResizes);
     }
 
     /// <summary>

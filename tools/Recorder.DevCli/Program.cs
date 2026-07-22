@@ -84,7 +84,8 @@ internal static class Program
 
         try
         {
-            RunRecording(settings, monitors[monitorIndex], outputFile, recordAudio, recordMicrophone, seconds, log);
+            string? windowTitle = ReadStringOption(args, "--window");
+            RunRecording(settings, monitors[monitorIndex], windowTitle, outputFile, recordAudio, recordMicrophone, seconds, log);
             return 0;
         }
         catch (Exception ex)
@@ -103,6 +104,7 @@ internal static class Program
     private static void RunRecording(
         RecorderSettings settings,
         MonitorInfo monitor,
+        string? windowTitle,
         string outputFile,
         bool recordAudio,
         bool recordMicrophone,
@@ -112,8 +114,21 @@ internal static class Program
         using var graphicsDevice = new D3D11GraphicsDevice();
         log.Information("GPU: {Adapter}", graphicsDevice.GetAdapterDescription());
 
-        using var session = new RecordingSession(
-            graphicsDevice, settings, monitor, outputFile, log, recordAudio, recordMicrophone);
+        // --window records the first window whose title contains the given text;
+        // without it the selected monitor is recorded.
+        RecordingSession CreateSession()
+        {
+            if (windowTitle is null)
+            {
+                return new RecordingSession(graphicsDevice, settings, monitor, outputFile, log, recordAudio, recordMicrophone);
+            }
+            CapturableWindow window = WindowEnumeration.GetCapturableWindows()
+                .FirstOrDefault(w => w.Title.Contains(windowTitle, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"No visible window title contains \"{windowTitle}\".");
+            return new RecordingSession(graphicsDevice, settings, window, outputFile, log, recordAudio, recordMicrophone);
+        }
+
+        using RecordingSession session = CreateSession();
         using var stopSignal = new ManualResetEventSlim();
         using var hotkey = new GlobalStopHotkey(stopSignal.Set);
         log.Information(hotkey.RegistrationSucceeded
