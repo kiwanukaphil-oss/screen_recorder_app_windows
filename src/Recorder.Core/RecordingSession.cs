@@ -274,9 +274,10 @@ public sealed class RecordingSession : IDisposable
         }
 
         _log.Information(
-            "Recording finished: {Frames} frames written, {Dropped} dropped, {Chunks} audio chunks, {Gaps} silence gaps filled",
-            Statistics.FramesWritten, Statistics.FramesDropped,
-            Statistics.AudioChunksWritten, Statistics.SilenceGapsFilled);
+            "Recording finished: WGC delivered {Delivered}, pacer rejected {Rejected}, queue dropped {Dropped}, " +
+            "written {Frames}; audio chunks {Chunks}, silence gaps {Gaps}",
+            _captureSource.FramesDelivered, Statistics.FramesRejectedByPacer, Statistics.FramesDropped,
+            Statistics.FramesWritten, Statistics.AudioChunksWritten, Statistics.SilenceGapsFilled);
     }
 
     /// <summary>
@@ -287,8 +288,14 @@ public sealed class RecordingSession : IDisposable
     private void HandleFrameReady(ID3D11Texture2D ownedTexture, long timestamp100Ns)
     {
         long relative = timestamp100Ns - _baseTimestamp100Ns;
-        if (relative < 0 || _stopRequested || !_framePacer.ShouldAccept(relative))
+        if (relative < 0 || _stopRequested)
         {
+            ownedTexture.Dispose();
+            return;
+        }
+        if (!_framePacer.ShouldAccept(relative))
+        {
+            Statistics.OnFramePacerRejected();
             ownedTexture.Dispose();
             return;
         }

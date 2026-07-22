@@ -40,6 +40,22 @@ public sealed class Mp4SinkWriter : IDisposable
     /// independently — the roadmap's "separate audio tracks" requirement.
     /// </summary>
     public Mp4SinkWriter(string outputPath, ID3D11Device device, VideoEncodingConfig video, params AudioInputFormat[] audioTracks)
+        : this(outputPath, device, video, blockOnEncoderBackpressure: false, audioTracks)
+    {
+    }
+
+    /// <summary>
+    /// <paramref name="blockOnEncoderBackpressure"/>: live recording passes false —
+    /// the session's bounded queue is the pacing mechanism and WriteSample must never
+    /// block the mux thread. The benchmark harness passes true so that submission
+    /// rate equals real encoder throughput.
+    /// </summary>
+    public Mp4SinkWriter(
+        string outputPath,
+        ID3D11Device device,
+        VideoEncodingConfig video,
+        bool blockOnEncoderBackpressure,
+        params AudioInputFormat[] audioTracks)
     {
         MediaFoundationRuntime.AddRef();
         VideoConfig = video;
@@ -54,7 +70,10 @@ public sealed class Mp4SinkWriter : IDisposable
         writerAttributes.Set(SinkWriterAttributeKeys.ReadwriteEnableHardwareTransforms, 1u);
         // Throttling would block WriteSample to pace input against encoder speed; our
         // bounded queue upstream is the pacing mechanism, so writing must never block.
-        writerAttributes.Set(SinkWriterAttributeKeys.DisableThrottling, 1u);
+        if (!blockOnEncoderBackpressure)
+        {
+            writerAttributes.Set(SinkWriterAttributeKeys.DisableThrottling, 1u);
+        }
 
         // Encoder properties passed at creation time. Note: the NVENC MFT (driver
         // 576.x, RTX 3090) enforces a 1-second GOP regardless of this store, the
