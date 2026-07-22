@@ -17,8 +17,9 @@
                    Style="{StaticResource TitleTextBlockStyle}" />
 
         <StackPanel Grid.Row="1" Spacing="8">
-            <TextBlock Text="Monitor" Style="{StaticResource BodyStrongTextBlockStyle}" />
-            <ComboBox x:Name="MonitorPicker" HorizontalAlignment="Stretch" />
+            <TextBlock Text="Source" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <ComboBox x:Name="SourcePicker" HorizontalAlignment="Stretch"
+                      DropDownOpened="OnSourcePickerOpened" />
         </StackPanel>
 
         <Grid Grid.Row="2" ColumnSpacing="16">
@@ -44,13 +45,25 @@
             </StackPanel>
         </Grid>
 
-        <Button x:Name="RecordButton" Grid.Row="3"
-                HorizontalAlignment="Stretch" Height="56"
-                Style="{StaticResource AccentButtonStyle}"
-                Click="OnRecordButtonClick">
-            <TextBlock x:Name="RecordButtonLabel" Text="● Start recording"
-                       FontSize="18" />
-        </Button>
+        <Grid Grid.Row="3" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Button x:Name="RecordButton" Grid.Column="0"
+                    HorizontalAlignment="Stretch" Height="56"
+                    Style="{StaticResource AccentButtonStyle}"
+                    Click="OnRecordButtonClick">
+                <TextBlock x:Name="RecordButtonLabel" Text="● Start recording"
+                           FontSize="18" />
+            </Button>
+            <Button x:Name="PauseButton" Grid.Column="1"
+                    HorizontalAlignment="Stretch" Height="56"
+                    IsEnabled="False"
+                    Click="OnPauseButtonClick">
+                <TextBlock x:Name="PauseButtonLabel" Text="⏸ Pause" FontSize="16" />
+            </Button>
+        </Grid>
 
         <TextBlock x:Name="StatusText" Grid.Row="4"
                    Text="Ready. Ctrl+Shift+F9 stops recording from anywhere."

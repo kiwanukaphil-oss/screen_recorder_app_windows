@@ -20,7 +20,9 @@ public sealed partial class MainWindow : Window
     private readonly Logger _log;
     private readonly JsonSettingsStore _settingsStore;
     private readonly RecorderSettings _settings;
-    private readonly IReadOnlyList<MonitorInfo> _monitors;
+
+    /// <summary>Backing objects for SourcePicker items: MonitorInfo or CapturableWindow, same order.</summary>
+    private readonly List<object> _sources = new();
 
     private D3D11GraphicsDevice? _graphicsDevice;
     private RecordingSession? _session;
@@ -32,7 +34,7 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         Title = "Screen Recorder";
-        AppWindow.Resize(new SizeInt32(460, 640));
+        AppWindow.Resize(new SizeInt32(520, 700));
 
         string settingsDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Recorder");
@@ -40,15 +42,65 @@ public sealed partial class MainWindow : Window
         _settingsStore = new JsonSettingsStore(Path.Combine(settingsDirectory, "settings.json"));
         _settings = _settingsStore.Load(out _);
 
-        _monitors = MonitorEnumeration.GetActiveMonitors();
-        foreach (MonitorInfo monitor in _monitors)
-        {
-            MonitorPicker.Items.Add(
-                $"{monitor.DeviceName.TrimStart('\\', '.')} ({monitor.Width}x{monitor.Height}){(monitor.IsPrimary ? " — primary" : "")}");
-        }
-        MonitorPicker.SelectedIndex = Math.Max(0, _monitors.ToList().FindIndex(m => m.IsPrimary));
-
+        PopulateSourcePicker();
         Closed += (_, _) => StopRecordingIfActive();
+    }
+
+    /// <summary>
+    /// Fills the source list: monitors first (primary preselected), then every
+    /// capturable window. Re-run each time the dropdown opens so newly opened apps
+    /// appear without restarting.
+    /// </summary>
+    private void PopulateSourcePicker()
+    {
+        object? previousSelection = SourcePicker.SelectedIndex >= 0 && SourcePicker.SelectedIndex < _sources.Count
+            ? _sources[SourcePicker.SelectedIndex]
+            : null;
+
+        _sources.Clear();
+        SourcePicker.Items.Clear();
+
+        foreach (MonitorInfo monitor in MonitorEnumeration.GetActiveMonitors())
+        {
+            _sources.Add(monitor);
+            SourcePicker.Items.Add(
+                $"🖥 {monitor.DeviceName.TrimStart('\\', '.')} ({monitor.Width}x{monitor.Height}){(monitor.IsPrimary ? " — primary" : "")}");
+        }
+        foreach (CapturableWindow window in WindowEnumeration.GetCapturableWindows())
+        {
+            _sources.Add(window);
+            string title = window.Title.Length > 60 ? window.Title[..57] + "…" : window.Title;
+            SourcePicker.Items.Add($"🗔 {title}");
+        }
+
+        int restoredIndex = previousSelection is MonitorInfo prevMonitor
+            ? _sources.FindIndex(s => s is MonitorInfo m && m.Handle == prevMonitor.Handle)
+            : previousSelection is CapturableWindow prevWindow
+                ? _sources.FindIndex(s => s is CapturableWindow w && w.Handle == prevWindow.Handle)
+                : -1;
+        SourcePicker.SelectedIndex = restoredIndex >= 0
+            ? restoredIndex
+            : Math.Max(0, _sources.FindIndex(s => s is MonitorInfo m && m.IsPrimary));
+    }
+
+    private void OnSourcePickerOpened(object? sender, object args) => PopulateSourcePicker();
+
+    private void OnPauseButtonClick(object sender, RoutedEventArgs args)
+    {
+        if (_session is null)
+        {
+            return;
+        }
+        if (_session.IsPaused)
+        {
+            _session.Resume();
+            PauseButtonLabel.Text = "⏸ Pause";
+        }
+        else
+        {
+            _session.Pause();
+            PauseButtonLabel.Text = "▶ Resume";
+        }
     }
 
     private bool IsRecording => _session is not null;
@@ -91,7 +143,7 @@ public sealed partial class MainWindow : Window
         _settings.Codec = CodecPicker.SelectedIndex == 1 ? VideoCodecPreference.Hevc : VideoCodecPreference.H264;
         _settingsStore.Save(_settings);
 
-        MonitorInfo monitor = _monitors[Math.Max(0, MonitorPicker.SelectedIndex)];
+        object source = _sources[Math.Max(0, SourcePicker.SelectedIndex)];
         bool systemAudio = SystemAudioToggle.IsOn;
         bool microphone = MicrophoneToggle.IsOn;
 
@@ -102,10 +154,17 @@ public sealed partial class MainWindow : Window
         await Task.Run(() =>
         {
             _graphicsDevice = new D3D11GraphicsDevice();
-            _session = new RecordingSession(
-                _graphicsDevice, _settings, monitor, outputFile, _log, systemAudio, microphone);
+            _session = source switch
+            {
+                MonitorInfo monitor => new RecordingSession(
+                    _graphicsDevice, _settings, monitor, outputFile, _log, systemAudio, microphone),
+                CapturableWindow window => new RecordingSession(
+                    _graphicsDevice, _settings, window, outputFile, _log, systemAudio, microphone),
+                _ => throw new InvalidOperationException("Unknown capture source type."),
+            };
             _session.Start();
         });
+        PauseButton.IsEnabled = true;
 
         _stopHotkey = new GlobalStopHotkey(() => DispatcherQueue.TryEnqueue(async () =>
         {
@@ -134,13 +193,17 @@ public sealed partial class MainWindow : Window
         _statusTimer?.Stop();
         await Task.Run(session.Stop);
 
-        string file = session.OutputFilePath;
+        string file = session.OutputFiles[^1];
         double sizeMb = new FileInfo(file).Length / 1_048_576.0;
-        StatusText.Text = $"Saved {Path.GetFileName(file)} ({sizeMb:0.0} MB) — " +
-                          $"{session.Statistics.FramesWritten} frames, {session.Statistics.FramesDropped} dropped.";
+        string parts = session.OutputFiles.Count > 1 ? $" in {session.OutputFiles.Count} parts" : "";
+        string autoStop = session.AutoStopReason is string reason ? $" (auto-stopped: {reason})" : "";
+        StatusText.Text = $"Saved {Path.GetFileName(file)} ({sizeMb:0.0} MB){parts} — " +
+                          $"{session.Statistics.FramesWritten} frames, {session.Statistics.FramesDropped} dropped.{autoStop}";
 
         CleanUpSession();
         RecordButtonLabel.Text = "● Start recording";
+        PauseButton.IsEnabled = false;
+        PauseButtonLabel.Text = "⏸ Pause";
     }
 
     private void RefreshRecordingStatus()
@@ -149,15 +212,16 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        if (_session.HasFailed)
+        if (_session.HasFailed || _session.AutoStopReason is not null)
         {
-            StatusText.Text = "Recording failed — stopping…";
+            StatusText.Text = _session.AutoStopReason ?? "Recording failed — stopping…";
             _ = StopRecordingAsync();
             return;
         }
 
         TimeSpan elapsed = DateTime.UtcNow - _recordingStartedUtc;
-        StatusText.Text = $"Recording {elapsed:hh\\:mm\\:ss} — " +
+        string state = _session.IsPaused ? "Paused at" : "Recording";
+        StatusText.Text = $"{state} {elapsed:hh\\:mm\\:ss} — " +
                           $"{_session.Statistics.FramesWritten} frames written, " +
                           $"{_session.Statistics.FramesDropped} dropped.";
     }

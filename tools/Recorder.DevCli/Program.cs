@@ -66,6 +66,10 @@ internal static class Program
         {
             settings.CrashSafeContainer = false;
         }
+        if (ReadStringOption(args, "--container") is string container)
+        {
+            settings.OutputContainer = container;
+        }
         string outputDirectory = ReadStringOption(args, "--output") ?? settings.OutputDirectory;
         Directory.CreateDirectory(outputDirectory);
 
@@ -198,7 +202,8 @@ internal static class Program
 
         foreach (string producedFile in session.OutputFiles)
         {
-            var fileInfo = new FileInfo(producedFile);
+            string finalFile = ContainerRemuxer.RemuxOrKeepMp4(producedFile, settings.OutputContainer, log);
+            var fileInfo = new FileInfo(finalFile);
             log.Information("Wrote {File} ({Size:0.0} MB)", fileInfo.FullName,
                 fileInfo.Exists ? fileInfo.Length / 1_048_576.0 : 0);
         }

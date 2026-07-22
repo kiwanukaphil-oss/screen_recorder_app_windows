@@ -56,6 +56,9 @@ public sealed class RecorderSettings
     /// <summary>Stop recording gracefully when free disk space falls below this.</summary>
     public int MinFreeDiskGb { get; set; } = 2;
 
+    /// <summary>"mp4" (native) | "mkv" | "mov" — non-MP4 containers are remuxed after recording (needs ffmpeg).</summary>
+    public string OutputContainer { get; set; } = "mp4";
+
     public bool CaptureCursor { get; set; } = true;
 
     public bool VerboseLogging { get; set; }
