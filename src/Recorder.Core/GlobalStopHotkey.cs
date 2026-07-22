@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Recorder.DevCli;
+namespace Recorder.Core;
 
 /// <summary>
 /// System-wide Ctrl+Shift+F9 hotkey for stopping a recording while another app (or a

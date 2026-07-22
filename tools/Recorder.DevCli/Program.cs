@@ -2,7 +2,6 @@ using Recorder.Capture;
 using Recorder.Common.Logging;
 using Recorder.Common.Settings;
 using Recorder.Core;
-using Recorder.DevCli;
 using Recorder.Graphics;
 using Serilog.Core;
 
