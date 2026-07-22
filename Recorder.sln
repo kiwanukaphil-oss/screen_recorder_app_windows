@@ -1,0 +1,59 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{F6394C6F-4ED3-40EE-894B-DEFA638F1895}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Recorder.Common", "src\Recorder.Common\Recorder.Common.csproj", "{192FBD7C-B578-4093-AC97-5DC9E2CCF4A9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Recorder.Graphics", "src\Recorder.Graphics\Recorder.Graphics.csproj", "{F5E9F844-EAC9-4DF4-9A92-3A05CF973771}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Recorder.Capture", "src\Recorder.Capture\Recorder.Capture.csproj", "{AD35AC78-E219-4D7B-B84F-3AA516E853CF}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{BC4A0037-A6E0-4D69-8964-9ED1E2CAAA4E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Recorder.ScreenshotPoc", "tools\Recorder.ScreenshotPoc\Recorder.ScreenshotPoc.csproj", "{5502C826-F70B-4279-B028-E370FF0BB380}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{F126A017-6F58-4EF1-8F3D-6282517F9239}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Recorder.Tests", "tests\Recorder.Tests\Recorder.Tests.csproj", "{F2084ECD-3348-4CD3-94A7-2ACBBD4C4932}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{192FBD7C-B578-4093-AC97-5DC9E2CCF4A9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{192FBD7C-B578-4093-AC97-5DC9E2CCF4A9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{192FBD7C-B578-4093-AC97-5DC9E2CCF4A9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{192FBD7C-B578-4093-AC97-5DC9E2CCF4A9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F5E9F844-EAC9-4DF4-9A92-3A05CF973771}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F5E9F844-EAC9-4DF4-9A92-3A05CF973771}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F5E9F844-EAC9-4DF4-9A92-3A05CF973771}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F5E9F844-EAC9-4DF4-9A92-3A05CF973771}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AD35AC78-E219-4D7B-B84F-3AA516E853CF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AD35AC78-E219-4D7B-B84F-3AA516E853CF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AD35AC78-E219-4D7B-B84F-3AA516E853CF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AD35AC78-E219-4D7B-B84F-3AA516E853CF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5502C826-F70B-4279-B028-E370FF0BB380}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5502C826-F70B-4279-B028-E370FF0BB380}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5502C826-F70B-4279-B028-E370FF0BB380}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5502C826-F70B-4279-B028-E370FF0BB380}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F2084ECD-3348-4CD3-94A7-2ACBBD4C4932}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F2084ECD-3348-4CD3-94A7-2ACBBD4C4932}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F2084ECD-3348-4CD3-94A7-2ACBBD4C4932}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F2084ECD-3348-4CD3-94A7-2ACBBD4C4932}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{192FBD7C-B578-4093-AC97-5DC9E2CCF4A9} = {F6394C6F-4ED3-40EE-894B-DEFA638F1895}
+		{F5E9F844-EAC9-4DF4-9A92-3A05CF973771} = {F6394C6F-4ED3-40EE-894B-DEFA638F1895}
+		{AD35AC78-E219-4D7B-B84F-3AA516E853CF} = {F6394C6F-4ED3-40EE-894B-DEFA638F1895}
+		{5502C826-F70B-4279-B028-E370FF0BB380} = {BC4A0037-A6E0-4D69-8964-9ED1E2CAAA4E}
+		{F2084ECD-3348-4CD3-94A7-2ACBBD4C4932} = {F126A017-6F58-4EF1-8F3D-6282517F9239}
+	EndGlobalSection
+EndGlobal

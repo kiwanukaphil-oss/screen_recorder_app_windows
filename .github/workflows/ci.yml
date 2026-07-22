@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build (Release)
+        run: dotnet build Recorder.sln -c Release
+
+      # The capture PoC needs an interactive desktop session, which CI runners lack;
+      # only the pure unit tests run here. Capture is verified manually per M0's gate.
+      - name: Unit tests
+        run: dotnet test tests/Recorder.Tests -c Release --no-build

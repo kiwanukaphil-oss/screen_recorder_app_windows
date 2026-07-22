@@ -17,6 +17,8 @@ BenchmarkDotNet.Artifacts/
 
 # Local recordings & temp media produced during testing
 recordings/
+captures/
+*.png
 *.mp4
 *.mkv
 *.mov
