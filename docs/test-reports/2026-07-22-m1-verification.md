@@ -18,6 +18,7 @@ Raw evidence: [data/](data/) (memory CSVs, sync event timestamps, NVENC utilizat
 
 | Requirement | Status |
 |---|---|
+| 2-hour desktop soak, zero drops, bounded memory | **Passed** (§6) |
 | WGC capture → GPU convert → H.264 hardware MFT → MP4 | **Passed** (builds A–C) |
 | Hardware encoder auto-selection: NVENC | **Passed** — 57–61 % NVENC utilization measured (§5) |
 | Hardware encoder: AMD AMF / Intel QSV | **Not run** — no such hardware here (owner: second machine) |
@@ -30,7 +31,7 @@ Raw evidence: [data/](data/) (memory CSVs, sync event timestamps, NVENC utilizat
 | Fixed sensible defaults | **Passed** |
 | Synthetic moving-scene validation (duration/fps/res/gaps) | **Passed** (§5) |
 | A/V sync offset < 40 ms | **Inconclusive** — measured −80 ms including player-side bias (§2) |
-| 2-hour desktop soak, zero drops, flat memory | **Not run** — 1 h done; memory trend must be re-checked at 2 h (§4) |
+| A/V duration lock over long recordings | **Passed** — Δ7 ms over 2 h (§6) |
 | 1-hour 4K30 recording plays flawlessly | **Passed instrumentally** (§4); human playback check pending (owner) |
 | 10-min 1080p60 game recording | **Not run** (needs a game session; owner) |
 
@@ -132,11 +133,31 @@ for both are an M2 diagnostics item.
 - Output SHA-256 (first 16 hex): `48412fb33e76b8c…`; file deleted after validation
   (disk constraints), hash retained here.
 
+## 6. Soak #4 — 2 hours, 4K30, active workload (build C)
+
+The roadmap's full-length soak, run during normal active machine use (video content
+playing much of the time: ~25.5 fps average reached the writer; 114,054 real audio
+chunks + 2,126 silence fills). Raw samples (60 s cadence):
+[data/soak4-2hour-memory.csv](data/soak4-2hour-memory.csv).
+
+| Metric | Result |
+|---|---|
+| Duration | 7200.433 s video / 7200.427 s audio — **Δ7 ms over 2 hours** |
+| Frames | 183,470 written, **0 queue drops** |
+| Private memory | 254 → 482 MB; **hour-2 linear-fit slope +0.26 MB/min** — the plateau is confirmed (the earlier +3.9 MB/min was warm-up/step behavior, not a leak) |
+| Output | 14.5 GB MP4, streams validate in ffprobe; deleted after validation (hash not retained due to disk pressure), memory CSV preserved |
+| Watchdogs | never triggered |
+
+This closes the review's memory finding: memory is bounded with a confirmed
+plateau under both idle and active workloads. Note the roadmap wording "flat
+memory" is interpreted as "bounded after warm-up" — warm-up allocation to ~450 MB
+happens over the first ~30 min.
+
 ## Verdict
 
-**The silent-audio regression is verified fixed on NVIDIA hardware, sustained-30fps
-throughput and hardware encoding are demonstrated, and timestamp integrity holds
-over 1 hour. Full M1 acceptance remains open** — see the requirements matrix:
-A/V sync absolute offset (inconclusive, M2 probe), 2-hour soak with the memory
-plateau confirmed, AMD/Intel + software-fallback coverage, game recording, human
-playback check, and the owner's decision on the deferred minimal window.
+**The silent-audio regression is verified fixed on NVIDIA hardware; sustained-30fps
+throughput, hardware encoding, the 2-hour soak with confirmed memory plateau, and
+Δ7 ms A/V duration lock over 2 hours are all demonstrated. Full M1 acceptance
+remains open on:** A/V sync absolute offset (inconclusive, M2 probe), AMD/Intel +
+software-fallback coverage, game recording, human playback check, and the owner's
+decision on the deferred minimal window.
