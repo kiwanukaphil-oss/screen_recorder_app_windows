@@ -1,0 +1,24 @@
+# Soak #1, failing build A (commit f32e3f5), started 2026-07-22 09:03 local.
+# PARTIAL: only the samples captured before the monitoring shell was recycled survive;
+# the machine crashed (commit-memory exhaustion) around t=540 s. Column 2 is working
+# set MB, column 3 private (commit) MB. Preserved from the live monitoring output.
+time_s,workingset_mb,privatemem_mb
+0,113.5,782.5
+20,110.6,4196.9
+41,112.6,10522.6
+61,113.4,13366.1
+81,114.0,14835.4
+102,114.6,16305.0
+122,114.9,17582.7
+142,147.5,19116.3
+163,147.8,20458.1
+183,149.6,22375.9
+203,1998.6,24260.2
+224,4484.7,26751.6
+244,6588.5,28859.5
+265,6940.1,29211.1
+285,6940.1,29211.1
+305,6940.2,29211.2
+326,6940.2,29211.2
+346,6940.2,29211.2
+366,6940.2,29211.2

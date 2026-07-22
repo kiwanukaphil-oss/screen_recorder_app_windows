@@ -1,0 +1,10 @@
+black_end:0.512867	silence_end: 0.426667
+black_end:1.512867	silence_end: 1.429333
+black_end:2.512867	silence_end: 2.432083
+black_end:3.512867	silence_end: 3.434667
+black_end:4.512867	silence_end: 4.437333
+black_end:5.512867	silence_end: 5.440083
+black_end:6.512867	silence_end: 6.442667
+black_end:7.512867	silence_end: 7.424083
+black_end:8.512867	silence_end: 8.426667
+black_end:9.612867	silence_end: 9.941333

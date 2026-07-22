@@ -1,112 +1,142 @@
-# M1 Verification Report — 2026-07-22
+# M1 Verification Report — 2026-07-22 (rev. 2)
+
+Revised per [review](2026-07-22-m1-verification-review.md); rev. 1 is in git history.
 
 Hardware: NVIDIA GeForce RTX 3090, single 3840×2160 monitor, Windows 11 (22631).
-Build: commit `f32e3f5` (M1 recording engine), Release.
+Tools: ffmpeg/ffprobe 8.1.2 (Gyan build), .NET SDK 8.0.423, Release configuration.
+Raw evidence: [data/](data/) (memory CSVs, sync event timestamps, NVENC utilization).
 
-## 1. Functional recording test
+**Builds under test** (per review finding 1 — each test lists its build):
 
-10-second recording via `Recorder.DevCli --seconds 10`, system audio on, desktop workload.
+| Build | Identity | Role |
+|---|---|---|
+| A | commit `f32e3f5` | M1 engine as first committed — **failing build** (soak #1 crash) |
+| B | uncommitted working tree: `f32e3f5` + stall fixes with inline pacing | regression test + soak #2 (functionally equivalent to C; pacing later extracted to `FramePacer` without behavior change) |
+| C | commit `34480f7` | fixed build — soak #3 (1 h) and moving-scene test |
 
-| Check | Result |
+## Requirements matrix (roadmap M1)
+
+| Requirement | Status |
 |---|---|
-| Container/streams (ffprobe) | ✅ MP4, H.264 High 3840×2160, AAC-LC 48 kHz stereo |
-| Hardware encoder used | ✅ NVENC MFT selected by sink writer (CPU stayed near-idle) |
-| Dropped frames | ✅ 0 of 301 |
-| Timestamp monotonicity | ✅ 601 video packets, 0 non-monotonic DTS |
-| Frame content spot-check | ✅ frame at t=5 s pixel-correct, right-side up, correct colors |
-| Idle-efficiency behavior | ✅ static desktop delivered ~30 fps of change events, not a forced 60 |
+| WGC capture → GPU convert → H.264 hardware MFT → MP4 | **Passed** (builds A–C) |
+| Hardware encoder auto-selection: NVENC | **Passed** — 57–61 % NVENC utilization measured (§5) |
+| Hardware encoder: AMD AMF / Intel QSV | **Not run** — no such hardware here (owner: second machine) |
+| Software encoder fallback | **Not run** — needs a GPU-less environment or forced-off test |
+| WASAPI system-audio loopback, single mixed track | **Passed** (soak #3 interleaved real audio + silence) |
+| QPC timestamping end-to-end | **Passed** — zero timestamp gaps (§5); stability verified (§2) |
+| Start/stop global hotkey | **Passed** (manual check during development) |
+| Start/stop minimal window | **Deferred — owner decision pending** (CLI stands in; UI is M4) |
+| Output folder selection | **Partial** — CLI `--output` only; picker UI deferred with the window |
+| Fixed sensible defaults | **Passed** |
+| Synthetic moving-scene validation (duration/fps/res/gaps) | **Passed** (§5) |
+| A/V sync offset < 40 ms | **Inconclusive** — measured −80 ms including player-side bias (§2) |
+| 2-hour desktop soak, zero drops, flat memory | **Not run** — 1 h done; memory trend must be re-checked at 2 h (§4) |
+| 1-hour 4K30 recording plays flawlessly | **Passed instrumentally** (§4); human playback check pending (owner) |
+| 10-min 1080p60 game recording | **Not run** (needs a game session; owner) |
 
-Observation: output is constant-frame-rate (~60 fps, 601 packets/10.04 s) — Media
-Foundation duplicates frames to honor the declared frame rate. Correct but wasteful
-for idle screens; revisit in M2 (declare actual rate or pace frames explicitly).
+## 1. Functional recording test (build A)
 
-## 2. A/V sync measurement
+10 s, `Recorder.DevCli --seconds 10`, defaults (4K60), system audio on, desktop workload.
 
-Method: generated a "digital clapperboard" clip (100 ms white flash + 1 kHz beep at
-every second boundary, ffmpeg lavfi), played it fullscreen with ffplay while
-recording, then located flashes (`blackdetect`) and beeps (`silencedetect`) in the
-recording.
+ffprobe: MP4, H.264 High 3840×2160, AAC-LC 48 kHz stereo, 10.04 s; 601 video
+packets, 0 non-monotonic DTS; extracted frame pixel-correct and right-side up.
+301 samples were submitted but 601 packets encoded — MF duplicated frames to reach
+the declared 60 fps CFR. Fixed by pacing in build B/C (§5 shows 1:1).
 
-Result over 9 clean events:
+## 2. A/V sync measurement (build A)
 
-- Audio leads video by **~80 ms mean**, jitter **±8 ms**, **no cumulative drift** over 10 s.
+Method: 10 s clip with a 100 ms white flash + 1 kHz beep at each second (ffmpeg
+lavfi), played fullscreen with ffplay while recording; flashes located with
+`blackdetect`, beeps with `silencedetect`. Event timestamps: [data/avsync-events.txt](data/avsync-events.txt).
 
-Interpretation: stability (jitter/drift) is the recorder's responsibility and passes
-cleanly. The constant 80 ms bias mixes player-side display latency, compositor
-latency, and any real pipeline skew — this method cannot separate them.
+Result over 9 clean events: audio leads video by 70–89 ms (mean ≈ −80 ms), jitter
+±8 ms, no cumulative drift. A 10th event at the clip boundary is an artifact and
+was excluded.
 
-**Follow-up (M2):** build a dedicated sync probe (D3D swapchain flip + WASAPI beep
-issued from the same QPC read, no media player involved) to measure true pipeline
-skew, then apply a calibration offset in the muxer if needed. Target: |offset| ≤ 40 ms.
+**Status vs the < 40 ms target: INCONCLUSIVE.** The measurement includes ffplay's
+own audio/display alignment and the compositor path, which cannot be separated from
+recorder-side skew with this method. M2 will use a player-free probe (D3D swapchain
+flip + WASAPI submission from one QPC read) and, if needed, a calibration offset.
+What this test does establish: timestamp *stability* (jitter/drift) is good.
 
-## 3. Soak test #1 (15 min, 4K30) — FAILED, found a critical bug
+## 3. Soak #1, 15 min 4K30 — CRASHED the machine (build A) and found the M1-critical bug
 
-The first soak (with system audio from an active call) ballooned **private/commit
-memory from 0.8 GB to 29 GB in ~4.5 minutes** while writing only 1.7 MB of output,
-exhausted the pagefile, and took the whole machine down (blank screen, forced
-restart). The interrupted MP4 was unplayable (`moov atom not found`) — live
-confirmation of the M3 crash-recovery requirement.
+With system audio active at start (a live call), then silence: private/commit memory
+grew from 0.78 GB to 29.2 GB in ~4.5 min (~100 MB/s), working set stayed ~115 MB,
+output stalled at 1.7 MB, the pagefile exhausted the disk and the machine went down.
+Partial raw samples: [data/soak1-crash-memory-partial.csv](data/soak1-crash-memory-partial.csv).
+The interrupted MP4 had no moov atom — unplayable (confirms the M3 crash-recovery
+requirement).
 
-**Root cause:** WASAPI loopback delivers *no data at all* while the system is silent.
-The audio timeline only advanced when a chunk arrived, so when audio stopped, the MF
-sink writer — which buffers streams to interleave them — held every incoming raw 4K
-BGRA frame (~33 MB each) in memory waiting for audio that never came (~100 MB/s of
-commit growth on a light desktop). Short functional tests never caught it because
-audio happened to be playing continuously through all of them.
+**Root cause:** WASAPI loopback delivers nothing during silence; the audio timeline
+only advanced on data arrival; the MF sink writer buffers video samples (raw 33 MB
+BGRA textures) while waiting to interleave the lagging audio stream → unbounded.
 
-**Fixes (RecordingSession):**
-1. *Audio clock driven by the mux loop* — silence is synthesized whenever written
-   audio trails written video by > 200 ms, independent of loopback delivery.
-2. *Frame pacing* — capture is decimated to the configured FPS on a fixed cadence,
-   so the encoder never receives faster-than-declared input.
-3. *Memory fail-safe* — the mux thread aborts the recording cleanly if process
-   commit memory exceeds 4 GB (a stall can never take the machine down again).
+**Fixes (build B/C):** mux-loop-driven audio clock (silence synthesized whenever
+audio trails video > 200 ms); frame pacing to the configured FPS (`FramePacer`,
+unit-tested); memory fail-safe aborting the recording if private memory exceeds
+4 GB. The fail-safe *bounds the known failure mode while the mux loop is making
+progress*; it cannot fire while the mux thread is blocked inside a native call, so
+it is a mitigation, not a guarantee.
 
-**Regression test (20 s, fps 30, audio playing 5 s then silent):** memory plateaued
-at ~200 MB (previously unbounded), 439 silence gaps filled, output valid — video
-20.33 s / audio 20.18 s (within the 200 ms design lag), 610 frames = exactly 30 FPS.
+Regression test (build B; 20 s, fps 30, tone for 5 s then silence): memory plateau
+~200 MB, 439 silence fills, valid output, video 20.33 s / audio 20.18 s, 610
+samples submitted = 30 fps.
 
-## 4. Soak test #2 (15 min, 4K30, fixed build)
+## 4. Soak #2 (15 min, silent) and Soak #3 (1 hour, mixed) — builds B and C
 
-15-minute unattended recording, 20 s sampling of working set / private memory / free
-disk, external watchdog killing the process if private memory exceeds 8 GB.
+Raw samples: [data/soak2-silent-15min-memory.csv](data/soak2-silent-15min-memory.csv),
+[data/soak3-1hour-memory.csv](data/soak3-1hour-memory.csv) (20 s / 60 s cadence;
+watchdogs armed at 8 GB private / < 8 GB disk free — never triggered).
 
-**PASSED** — and under the harshest condition: the system was completely silent for
-the entire run (0 real audio chunks), i.e. soak #1's fatal scenario end to end.
+Soak #2 (build B) is a **silent-idle regression soak**, not a throughput test: the
+desktop was idle (~12 fps of change events reached the writer) and the system was
+silent for all 15 min (0 real audio chunks — soak #1's fatal condition end-to-end).
+Result: 10,631 samples written, 0 queue drops, 10,627 silence fills, valid 794 MB
+MP4, video 900.066667 s / audio 899.903646 s (Δ163 ms, within the 200 ms design lag).
 
-| Metric | Result |
-|---|---|
-| Duration | 900.07 s video / 899.90 s audio (Δ160 ms, within 200 ms design lag) |
-| Frames | 10,631 written, **0 dropped** (~12 fps avg — event-driven idle desktop) |
-| Silence fills | 10,627 (audio clock driven by mux loop throughout) |
-| Private memory | peak 699 MB, mean 421 MB over 45 samples — flat, no leak |
-| Working set | ~160 MB flat |
-| Output | 794 MB MP4, validates in ffprobe, watchdog never triggered |
+Soak #3 (build C, 1 h, normal machine use with real audio on and off): 31,368
+samples written, 0 queue drops, 28,639 real audio chunks + 11,829 silence fills,
+valid 3.45 GB MP4, video 3600.233333 s / audio 3600.426271 s (Δ193 ms).
 
-## 5. Exit-gate recording (1 hour, 4K30)
+**Memory (per review finding 3 — "flat" was not previously demonstrated):**
 
-Unattended 1-hour recording during normal machine use (mixed real audio and
-silence), 60 s sampling, watchdog armed for memory > 8 GB or free disk < 8 GB.
+| Run | first → last | min / max | steady-state linear-fit slope |
+|---|---|---|---|
+| Soak #2 (15 min) | 249 → 478 MB | 249 / 699 MB | **+2.8 MB/min** (t ≥ 300 s) |
+| Soak #3 (1 h) | 252 → 513 MB | 252 / 598 MB | **+3.9 MB/min** (t ≥ 900 s) |
 
-**PASSED:**
+Memory is **bounded but not flat**: soak #3 stepped 405 → 575 MB between minutes
+20–45, then held ~575 MB for the final 10 minutes. Consistent with heap/buffer
+growth reaching a plateau rather than an unbounded leak, but the 2-hour soak must
+confirm the plateau before the "flat memory" criterion can be marked passed.
+Watch item for M2 (buffer pooling will also change this profile).
 
-| Metric | Result |
-|---|---|
-| Duration | 3600.23 s video / 3600.43 s audio — tracks matched over a full hour |
-| Frames | 31,368 written, **0 dropped** |
-| Audio | 28,639 real chunks + 11,829 silence fills (alternating audio/silence handled) |
-| Private memory | peak 598 MB, mean 478 MB over 60 samples — flat for the entire hour |
-| Output | 3.45 GB MP4, validates in ffprobe; watchdog never triggered |
+Counter definitions (per review finding 4): "written" = samples submitted to the
+sink writer; "dropped" = bounded-queue overflow evictions only. Frames rejected by
+`FramePacer` and WGC's own delivery rate are not separately counted yet — counters
+for both are an M2 diagnostics item.
+
+## 5. Moving-scene throughput + encoder identification (build C)
+
+60 s recording (`--fps 30 --no-audio`) of fullscreen ffplay `testsrc2` 1080p60
+(continuous motion), NVENC utilization sampled via `nvidia-smi` every 8 s.
+
+- Sustained throughput: **1,803 samples written in 60.1 s = 30.0 fps, 0 drops**.
+- Encoded packets = 1,803 = samples submitted (1:1, no duplication — pacing fix).
+- `avg_frame_rate` 30/1 at 3840×2160; **max inter-frame gap 33.3 ms** (= exactly one
+  frame interval → zero timestamp gaps).
+- **NVENC utilization 0 % → 57–61 % during recording**
+  ([data/moving-scene-nvenc-utilization.txt](data/moving-scene-nvenc-utilization.txt)) —
+  direct evidence the NVIDIA hardware encoder MFT is doing the encoding.
+- Output SHA-256 (first 16 hex): `48412fb33e76b8c…`; file deleted after validation
+  (disk constraints), hash retained here.
 
 ## Verdict
 
-M1 engine verified on NVIDIA hardware, including the 1-hour exit-gate recording.
-Remaining exit-gate items (owner): second Windows 11 machine (ideally AMD/Intel GPU
-for the encoder-vendor criterion), human playback check of a recording, sign-off on
-the deferred minimal window (CLI + global hotkey stands in until the M4 UI).
-
-## Known gaps deferred inside M1
-
-- Minimal UI window: deferred until the WinUI 3 project lands (no VS templates on
-  this machine); DevCli + global hotkey covers M1's control needs.
-- 2-hour soak on a second machine: owner task (M0/M1 exit-gate item).
+**The silent-audio regression is verified fixed on NVIDIA hardware, sustained-30fps
+throughput and hardware encoding are demonstrated, and timestamp integrity holds
+over 1 hour. Full M1 acceptance remains open** — see the requirements matrix:
+A/V sync absolute offset (inconclusive, M2 probe), 2-hour soak with the memory
+plateau confirmed, AMD/Intel + software-fallback coverage, game recording, human
+playback check, and the owner's decision on the deferred minimal window.
