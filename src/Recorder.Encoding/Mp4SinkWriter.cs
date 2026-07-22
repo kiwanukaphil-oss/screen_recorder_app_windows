@@ -26,6 +26,8 @@ public sealed class Mp4SinkWriter : IDisposable
 
     private readonly IMFDXGIDeviceManager _deviceManager;
     private readonly IMFSinkWriter _writer;
+    private readonly IMFMediaSink? _fragmentedSink;
+    private readonly IMFByteStream? _fragmentedByteStream;
     private readonly int _videoStreamIndex;
     private readonly int[] _audioStreamIndices;
     private readonly long _videoFrameDuration100Ns;
@@ -34,13 +36,26 @@ public sealed class Mp4SinkWriter : IDisposable
 
     public VideoEncodingConfig VideoConfig { get; }
 
+    /// <summary>True when writing crash-safe fragmented MP4 (§: playable up to the last fragment).</summary>
+    public bool IsFragmented => _fragmentedSink is not null;
+
     /// <summary>
     /// Each entry in <paramref name="audioTracks"/> becomes its own AAC track in the
     /// MP4 (track 0 first). Editors can then mix/mute system audio and microphone
     /// independently — the roadmap's "separate audio tracks" requirement.
     /// </summary>
     public Mp4SinkWriter(string outputPath, ID3D11Device device, VideoEncodingConfig video, params AudioInputFormat[] audioTracks)
-        : this(outputPath, device, video, blockOnEncoderBackpressure: false, audioTracks)
+        : this(outputPath, device, video, blockOnEncoderBackpressure: false, fragmentedContainer: false, audioTracks)
+    {
+    }
+
+    public Mp4SinkWriter(
+        string outputPath,
+        ID3D11Device device,
+        VideoEncodingConfig video,
+        bool blockOnEncoderBackpressure,
+        params AudioInputFormat[] audioTracks)
+        : this(outputPath, device, video, blockOnEncoderBackpressure, fragmentedContainer: false, audioTracks)
     {
     }
 
@@ -49,14 +64,25 @@ public sealed class Mp4SinkWriter : IDisposable
     /// the session's bounded queue is the pacing mechanism and WriteSample must never
     /// block the mux thread. The benchmark harness passes true so that submission
     /// rate equals real encoder throughput.
+    /// <paramref name="fragmentedContainer"/>: writes fragmented MP4 — the file is
+    /// playable up to the last flushed fragment even after a crash or power loss,
+    /// at the cost of supporting at most ONE audio track (a limitation of
+    /// MFCreateFMPEG4MediaSink; callers must downgrade or drop tracks first).
     /// </summary>
     public Mp4SinkWriter(
         string outputPath,
         ID3D11Device device,
         VideoEncodingConfig video,
         bool blockOnEncoderBackpressure,
+        bool fragmentedContainer,
         params AudioInputFormat[] audioTracks)
     {
+        if (fragmentedContainer && audioTracks.Length > 1)
+        {
+            throw new NotSupportedException(
+                "The fragmented-MP4 sink supports at most one audio track; mix or drop tracks first.");
+        }
+
         MediaFoundationRuntime.AddRef();
         VideoConfig = video;
         _audioFormats = audioTracks;
@@ -83,10 +109,42 @@ public sealed class Mp4SinkWriter : IDisposable
         encoderConfig.Set(CodecApi.GopSize, (uint)(video.KeyframeIntervalSeconds * video.FramesPerSecond));
         writerAttributes.Set(SinkWriterAttributeKeys.EncoderConfig, encoderConfig);
 
-        _writer = MediaFactory.MFCreateSinkWriterFromURL(outputPath, null, writerAttributes);
+        if (!fragmentedContainer)
+        {
+            _writer = MediaFactory.MFCreateSinkWriterFromURL(outputPath, null, writerAttributes);
+            _videoStreamIndex = AddVideoStream(video);
+            _audioStreamIndices = _audioFormats.Select(AddAudioStream).ToArray();
+        }
+        else
+        {
+            // The fMP4 media sink is created with its final output types up front; the
+            // sink writer wraps it and its streams keep the sink's fixed indices
+            // (0 = video, 1 = audio).
+            using IMFMediaType videoOutputType = CreateVideoOutputType(video);
+            using IMFMediaType? audioOutputType = _audioFormats.Length == 1 ? CreateAudioOutputType(_audioFormats[0]) : null;
 
-        _videoStreamIndex = AddVideoStream(video);
-        _audioStreamIndices = _audioFormats.Select(AddAudioStream).ToArray();
+            _fragmentedByteStream = MediaFactory.MFCreateFile(
+                FileAccessMode.MfAccessModeReadwrite, FileOpenMode.MfOpenModeDeleteIfExist, FileFlags.None, outputPath);
+            MediaFactory.MFCreateFMPEG4MediaSink(
+                _fragmentedByteStream, videoOutputType, audioOutputType, out _fragmentedSink).CheckError();
+            _writer = MediaFactory.MFCreateSinkWriterFromMediaSink(_fragmentedSink, writerAttributes);
+
+            _videoStreamIndex = 0;
+            using (IMFMediaType videoInputType = CreateVideoInputType(video))
+            {
+                _writer.SetInputMediaType(_videoStreamIndex, videoInputType, null);
+            }
+            if (_audioFormats.Length == 1)
+            {
+                using IMFMediaType audioInputType = CreateAudioInputType(_audioFormats[0]);
+                _writer.SetInputMediaType(1, audioInputType, null);
+                _audioStreamIndices = new[] { 1 };
+            }
+            else
+            {
+                _audioStreamIndices = Array.Empty<int>();
+            }
+        }
 
         // The encoder MFT exists once the input type is set; codec properties must be
         // applied before BeginWriting for most encoders to honor them.
@@ -104,7 +162,25 @@ public sealed class Mp4SinkWriter : IDisposable
     /// </summary>
     private int AddVideoStream(VideoEncodingConfig video)
     {
-        using IMFMediaType outputType = MediaFactory.MFCreateMediaType();
+        using IMFMediaType outputType = CreateVideoOutputType(video);
+        int streamIndex = _writer.AddStream(outputType);
+        using IMFMediaType inputType = CreateVideoInputType(video);
+        _writer.SetInputMediaType(streamIndex, inputType, null);
+        return streamIndex;
+    }
+
+    private int AddAudioStream(AudioInputFormat audio)
+    {
+        using IMFMediaType outputType = CreateAudioOutputType(audio);
+        int streamIndex = _writer.AddStream(outputType);
+        using IMFMediaType inputType = CreateAudioInputType(audio);
+        _writer.SetInputMediaType(streamIndex, inputType, null);
+        return streamIndex;
+    }
+
+    private static IMFMediaType CreateVideoOutputType(VideoEncodingConfig video)
+    {
+        IMFMediaType outputType = MediaFactory.MFCreateMediaType();
         outputType.Set(MediaTypeAttributeKeys.MajorType, MediaTypeGuids.Video);
         outputType.Set(MediaTypeAttributeKeys.Subtype,
             video.Codec == VideoCodec.Hevc ? VideoFormatGuids.Hevc : VideoFormatGuids.H264);
@@ -123,12 +199,19 @@ public sealed class Mp4SinkWriter : IDisposable
             // HEVC MFTs choose their own profile; forcing one is rejected by some vendors.
             outputType.Set(MediaTypeAttributeKeys.Mpeg2Profile, H264ProfileHigh);
         }
-        int streamIndex = _writer.AddStream(outputType);
+        return outputType;
+    }
 
-        // Input type describes what capture delivers; when its size differs from the
-        // output type's, the GPU video processor scales during the same pass it uses
-        // for BGRA -> NV12 conversion.
-        using IMFMediaType inputType = MediaFactory.MFCreateMediaType();
+    /// <summary>
+    /// Input type describes what capture delivers; when its size differs from the
+    /// output type's, the GPU video processor scales during the same pass it uses for
+    /// BGRA → NV12 conversion. The positive DefaultStride declares top-down row order,
+    /// matching D3D11 textures (without it MF assumes bottom-up RGB and the video
+    /// comes out vertically flipped).
+    /// </summary>
+    private static IMFMediaType CreateVideoInputType(VideoEncodingConfig video)
+    {
+        IMFMediaType inputType = MediaFactory.MFCreateMediaType();
         inputType.Set(MediaTypeAttributeKeys.MajorType, MediaTypeGuids.Video);
         inputType.Set(MediaTypeAttributeKeys.Subtype, VideoFormatGuids.Rgb32);
         inputType.Set(MediaTypeAttributeKeys.InterlaceMode, InterlaceModeProgressive);
@@ -137,30 +220,29 @@ public sealed class Mp4SinkWriter : IDisposable
         inputType.Set(MediaTypeAttributeKeys.PixelAspectRatio, Pack(1, 1));
         inputType.Set(MediaTypeAttributeKeys.AllSamplesIndependent, 1u);
         inputType.Set(MediaTypeAttributeKeys.DefaultStride, (uint)(video.EffectiveSourceWidth * 4));
-        _writer.SetInputMediaType(streamIndex, inputType, null);
-
-        return streamIndex;
+        return inputType;
     }
 
     /// <summary>
-    /// Declares AAC output and the float-PCM input WASAPI delivers. Output is always
-    /// stereo/16-bit at the closest supported sample rate; when the input differs
-    /// (e.g. 5.1 float), the sink writer inserts the MF resampler to downmix/convert.
+    /// AAC output: always stereo/16-bit at the closest supported sample rate; when the
+    /// input differs (e.g. 5.1 float), the sink writer inserts the MF resampler.
     /// </summary>
-    private int AddAudioStream(AudioInputFormat audio)
+    private static IMFMediaType CreateAudioOutputType(AudioInputFormat audio)
     {
         int outputRate = audio.SampleRate is 44_100 or 48_000 ? audio.SampleRate : 48_000;
-
-        using IMFMediaType outputType = MediaFactory.MFCreateMediaType();
+        IMFMediaType outputType = MediaFactory.MFCreateMediaType();
         outputType.Set(MediaTypeAttributeKeys.MajorType, MediaTypeGuids.Audio);
         outputType.Set(MediaTypeAttributeKeys.Subtype, AudioFormatGuids.Aac);
         outputType.Set(MediaTypeAttributeKeys.AudioNumChannels, 2u);
         outputType.Set(MediaTypeAttributeKeys.AudioSamplesPerSecond, (uint)outputRate);
         outputType.Set(MediaTypeAttributeKeys.AudioBitsPerSample, 16u);
         outputType.Set(MediaTypeAttributeKeys.AudioAvgBytesPerSecond, (uint)AacBytesPerSecond);
-        int streamIndex = _writer.AddStream(outputType);
+        return outputType;
+    }
 
-        using IMFMediaType inputType = MediaFactory.MFCreateMediaType();
+    private static IMFMediaType CreateAudioInputType(AudioInputFormat audio)
+    {
+        IMFMediaType inputType = MediaFactory.MFCreateMediaType();
         inputType.Set(MediaTypeAttributeKeys.MajorType, MediaTypeGuids.Audio);
         inputType.Set(MediaTypeAttributeKeys.Subtype, AudioFormatGuids.Float);
         inputType.Set(MediaTypeAttributeKeys.AudioNumChannels, (uint)audio.Channels);
@@ -169,9 +251,7 @@ public sealed class Mp4SinkWriter : IDisposable
         inputType.Set(MediaTypeAttributeKeys.AudioBlockAlignment, (uint)audio.BlockAlign);
         inputType.Set(MediaTypeAttributeKeys.AudioAvgBytesPerSecond, (uint)audio.BytesPerSecond);
         inputType.Set(MediaTypeAttributeKeys.AllSamplesIndependent, 1u);
-        _writer.SetInputMediaType(streamIndex, inputType, null);
-
-        return streamIndex;
+        return inputType;
     }
 
     /// <summary>
@@ -306,6 +386,8 @@ public sealed class Mp4SinkWriter : IDisposable
     public void Dispose()
     {
         _writer.Dispose();
+        _fragmentedSink?.Dispose();
+        _fragmentedByteStream?.Dispose();
         _deviceManager.Dispose();
         MediaFoundationRuntime.Release();
     }

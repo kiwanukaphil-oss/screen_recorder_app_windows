@@ -69,7 +69,7 @@ public sealed class RecordingSession : IDisposable
         /// filled with explicit silence before the chunk so track duration always
         /// matches video.
         /// </summary>
-        public void Drain(Mp4SinkWriter sink, RecordingStatistics statistics)
+        public void Drain(Mp4SinkWriter sink, RecordingStatistics statistics, long writeOffset100Ns)
         {
             while (_queue.TryDequeue(out PendingChunk chunk))
             {
@@ -81,11 +81,11 @@ public sealed class RecordingSession : IDisposable
                 long gap = chunk.Timestamp100Ns - _nextTimestamp100Ns;
                 if (gap > GapThreshold100Ns)
                 {
-                    WriteSilence(sink, gap, statistics);
+                    WriteSilence(sink, gap, statistics, writeOffset100Ns);
                 }
 
                 ApplyGainInPlace(chunk.Pcm);
-                sink.WriteAudioChunk(TrackIndex, chunk.Pcm, chunk.Pcm.Length, _nextTimestamp100Ns);
+                sink.WriteAudioChunk(TrackIndex, chunk.Pcm, chunk.Pcm.Length, _nextTimestamp100Ns - writeOffset100Ns);
                 _nextTimestamp100Ns += chunk.Pcm.Length * 10_000_000L / Source.BytesPerSecond;
                 statistics.OnAudioChunkWritten();
             }
@@ -95,7 +95,7 @@ public sealed class RecordingSession : IDisposable
         /// Mux thread: advance this track's clock toward the video clock with
         /// synthesized silence, independent of source delivery.
         /// </summary>
-        public void KeepUpWithVideo(Mp4SinkWriter sink, long latestVideoTimestamp100Ns, RecordingStatistics statistics)
+        public void KeepUpWithVideo(Mp4SinkWriter sink, long latestVideoTimestamp100Ns, RecordingStatistics statistics, long writeOffset100Ns)
         {
             long target = latestVideoTimestamp100Ns - MaxLagBehindVideo100Ns;
             if (_nextTimestamp100Ns < 0)
@@ -110,7 +110,7 @@ public sealed class RecordingSession : IDisposable
             long gap = target - _nextTimestamp100Ns;
             if (gap > 0)
             {
-                WriteSilence(sink, gap, statistics);
+                WriteSilence(sink, gap, statistics, writeOffset100Ns);
             }
         }
 
@@ -133,7 +133,7 @@ public sealed class RecordingSession : IDisposable
             }
         }
 
-        private void WriteSilence(Mp4SinkWriter sink, long duration100Ns, RecordingStatistics statistics)
+        private void WriteSilence(Mp4SinkWriter sink, long duration100Ns, RecordingStatistics statistics, long writeOffset100Ns)
         {
             int silenceBytes = (int)(duration100Ns * Source.BytesPerSecond / 10_000_000L);
             silenceBytes -= silenceBytes % Source.BlockAlign();
@@ -141,7 +141,7 @@ public sealed class RecordingSession : IDisposable
             {
                 return;
             }
-            sink.WriteAudioChunk(TrackIndex, new byte[silenceBytes], silenceBytes, _nextTimestamp100Ns);
+            sink.WriteAudioChunk(TrackIndex, new byte[silenceBytes], silenceBytes, _nextTimestamp100Ns - writeOffset100Ns);
             _nextTimestamp100Ns += silenceBytes * 10_000_000L / Source.BytesPerSecond;
             statistics.OnSilenceGapFilled();
         }
@@ -158,20 +158,40 @@ public sealed class RecordingSession : IDisposable
     private readonly D3D11GraphicsDevice _graphicsDevice;
     private readonly ContinuousMonitorCaptureSource _captureSource;
     private readonly List<AudioTrackPipeline> _audioTracks = new();
-    private readonly Mp4SinkWriter _sinkWriter;
     private readonly BoundedFrameQueue<PendingVideoFrame> _videoQueue = new(VideoQueueCapacity);
     private readonly SemaphoreSlim _workAvailable = new(0);
     private readonly Thread _muxThread;
     private readonly FramePacer _framePacer;
+    private readonly RecorderSettings _settings;
+    private readonly VideoEncodingConfig _videoConfig;
+    private readonly AudioInputFormat[] _sinkAudioFormats;
+    private readonly bool _useFragmentedContainer;
+
+    private Mp4SinkWriter _sinkWriter;
+    private int _filePartNumber = 1;
+    private long _splitOffset100Ns;
+    private long _currentFileStart100Ns;
 
     private long _baseTimestamp100Ns;
     private long _latestVideoTimestamp100Ns;
-    private long _lastMemoryCheck100Ns;
+    private long _lastResourceCheck100Ns;
+    private long _pauseAdjustment100Ns;
+    private long _pausedSince100Ns;
+    private volatile bool _isPaused;
     private volatile bool _stopRequested;
     private Exception? _muxThreadFailure;
 
     public RecordingStatistics Statistics { get; } = new();
     public string OutputFilePath { get; }
+
+    /// <summary>Every file this session produced (splitting creates several).</summary>
+    public IReadOnlyList<string> OutputFiles => _outputFiles;
+    private readonly List<string> _outputFiles = new();
+
+    /// <summary>Non-null when the session stopped itself (e.g. disk low); UI should surface it.</summary>
+    public string? AutoStopReason { get; private set; }
+
+    public bool IsPaused => _isPaused;
 
     /// <summary>True once the mux thread has failed; the recording should be stopped promptly.</summary>
     public bool HasFailed => _muxThreadFailure is not null;
@@ -247,11 +267,21 @@ public sealed class RecordingSession : IDisposable
             SourceHeight: _captureSource.Height);
 
         _framePacer = new FramePacer(settings.FramesPerSecond);
+        _settings = settings;
+        _videoConfig = videoConfig;
+        _sinkAudioFormats = _audioTracks.Select(t => new AudioInputFormat(t.Source.SampleRate, t.Source.Channels)).ToArray();
+
+        _useFragmentedContainer = settings.CrashSafeContainer && _sinkAudioFormats.Length <= 1;
+        if (settings.CrashSafeContainer && !_useFragmentedContainer)
+        {
+            _log.Warning("Crash-safe container disabled: fragmented MP4 supports one audio track " +
+                         "and this session has {Tracks}; writing standard MP4", _sinkAudioFormats.Length);
+        }
+
         _sinkWriter = new Mp4SinkWriter(
-            outputFilePath,
-            graphicsDevice.Device,
-            videoConfig,
-            _audioTracks.Select(t => new AudioInputFormat(t.Source.SampleRate, t.Source.Channels)).ToArray());
+            outputFilePath, graphicsDevice.Device, videoConfig,
+            blockOnEncoderBackpressure: false, _useFragmentedContainer, _sinkAudioFormats);
+        _outputFiles.Add(outputFilePath);
 
         _muxThread = new Thread(RunMuxLoop)
         {
@@ -314,14 +344,41 @@ public sealed class RecordingSession : IDisposable
     }
 
     /// <summary>
-    /// WGC thread: re-base the timestamp, pace frames down to the configured FPS
-    /// (see <see cref="FramePacer"/> for why over-delivery is dangerous), and queue
-    /// the owned texture for the mux thread.
+    /// Pauses the recording: frames and audio are discarded and the paused wall time
+    /// is later subtracted from every timestamp, so the output timeline is seamless —
+    /// no frozen frames, no silence, no encoder restart.
+    /// </summary>
+    public void Pause()
+    {
+        if (_isPaused || _stopRequested)
+        {
+            return;
+        }
+        _pausedSince100Ns = QpcClock.GetTimestamp100Ns();
+        _isPaused = true;
+        _log.Information("Recording paused");
+    }
+
+    public void Resume()
+    {
+        if (!_isPaused)
+        {
+            return;
+        }
+        Interlocked.Add(ref _pauseAdjustment100Ns, QpcClock.GetTimestamp100Ns() - _pausedSince100Ns);
+        _isPaused = false;
+        _log.Information("Recording resumed");
+    }
+
+    /// <summary>
+    /// WGC thread: re-base the timestamp (minus accumulated pause time), pace frames
+    /// down to the configured FPS (see <see cref="FramePacer"/> for why over-delivery
+    /// is dangerous), and queue the owned texture for the mux thread.
     /// </summary>
     private void HandleFrameReady(ID3D11Texture2D ownedTexture, long timestamp100Ns)
     {
-        long relative = timestamp100Ns - _baseTimestamp100Ns;
-        if (relative < 0 || _stopRequested)
+        long relative = timestamp100Ns - _baseTimestamp100Ns - Interlocked.Read(ref _pauseAdjustment100Ns);
+        if (relative < 0 || _stopRequested || _isPaused)
         {
             ownedTexture.Dispose();
             return;
@@ -341,11 +398,11 @@ public sealed class RecordingSession : IDisposable
         _workAvailable.Release();
     }
 
-    /// <summary>Audio capture thread: re-base and hand to the track's own queue.</summary>
+    /// <summary>Audio capture thread: re-base (minus pause time) and hand to the track's queue.</summary>
     private void HandleAudioChunk(AudioTrackPipeline track, byte[] pcm, int byteCount, long chunkStart100Ns)
     {
-        long relative = chunkStart100Ns - _baseTimestamp100Ns;
-        if (relative < 0 || _stopRequested || byteCount == 0)
+        long relative = chunkStart100Ns - _baseTimestamp100Ns - Interlocked.Read(ref _pauseAdjustment100Ns);
+        if (relative < 0 || _stopRequested || _isPaused || byteCount == 0)
         {
             return;
         }
@@ -371,18 +428,19 @@ public sealed class RecordingSession : IDisposable
                 while (_videoQueue.TryDequeue(out PendingVideoFrame frame))
                 {
                     using ID3D11Texture2D texture = frame.Texture;
-                    _sinkWriter.WriteVideoFrame(texture, frame.Timestamp100Ns);
+                    _sinkWriter.WriteVideoFrame(texture, frame.Timestamp100Ns - _splitOffset100Ns);
                     _latestVideoTimestamp100Ns = frame.Timestamp100Ns;
                     Statistics.OnFrameWritten();
                 }
 
                 foreach (AudioTrackPipeline track in _audioTracks)
                 {
-                    track.Drain(_sinkWriter, Statistics);
-                    track.KeepUpWithVideo(_sinkWriter, _latestVideoTimestamp100Ns, Statistics);
+                    track.Drain(_sinkWriter, Statistics, _splitOffset100Ns);
+                    track.KeepUpWithVideo(_sinkWriter, _latestVideoTimestamp100Ns, Statistics, _splitOffset100Ns);
                 }
 
-                EnforceMemoryCeiling();
+                RotateOutputFileIfDue();
+                EnforceResourceLimits();
 
                 if (_stopRequested && _videoQueue.Count == 0 && _audioTracks.All(t => t.IsEmpty))
                 {
@@ -398,19 +456,58 @@ public sealed class RecordingSession : IDisposable
     }
 
     /// <summary>
-    /// Cheap watchdog (checked every ~2 s): if commit memory crosses the ceiling, some
-    /// stage is hoarding samples — abort the recording with a clear error instead of
-    /// exhausting the pagefile. This bounds the known failure mode while the mux loop
-    /// is making progress; it cannot fire while blocked inside a native call.
+    /// Mux thread: closes the current file and opens the next part when the configured
+    /// duration or size limit is reached. Timestamps are re-based so each part starts
+    /// at t = 0; the audio pipelines keep their global clocks and only the write
+    /// offset changes, so cross-part A/V alignment is preserved.
     /// </summary>
-    private void EnforceMemoryCeiling()
+    private void RotateOutputFileIfDue()
     {
-        long now = QpcClock.GetTimestamp100Ns();
-        if (now - _lastMemoryCheck100Ns < MemoryCheckInterval100Ns)
+        bool durationDue = _settings.SplitMaxDurationSeconds is int maxSeconds &&
+            _latestVideoTimestamp100Ns - _currentFileStart100Ns >= maxSeconds * 10_000_000L;
+        bool sizeDue = false;
+        if (!durationDue && _settings.SplitMaxSizeMb is int maxMb)
+        {
+            var info = new FileInfo(_outputFiles[^1]);
+            sizeDue = info.Exists && info.Length >= (long)maxMb * 1024 * 1024;
+        }
+        if (!durationDue && !sizeDue)
         {
             return;
         }
-        _lastMemoryCheck100Ns = now;
+
+        _sinkWriter.FinalizeFile();
+        _sinkWriter.Dispose();
+
+        _filePartNumber++;
+        string nextPath = Path.Combine(
+            Path.GetDirectoryName(OutputFilePath)!,
+            $"{Path.GetFileNameWithoutExtension(OutputFilePath)}-part{_filePartNumber}{Path.GetExtension(OutputFilePath)}");
+
+        _splitOffset100Ns = _latestVideoTimestamp100Ns + 10_000_000L / _videoConfig.FramesPerSecond;
+        _currentFileStart100Ns = _splitOffset100Ns;
+        _sinkWriter = new Mp4SinkWriter(
+            nextPath, _graphicsDevice.Device, _videoConfig,
+            blockOnEncoderBackpressure: false, _useFragmentedContainer, _sinkAudioFormats);
+        _outputFiles.Add(nextPath);
+        _log.Information("Split: continuing recording in {File}", nextPath);
+    }
+
+    /// <summary>
+    /// Cheap watchdog (checked every ~2 s). Memory over the ceiling aborts with an
+    /// error (a stalled pipeline — bounds the known failure mode while the mux loop is
+    /// making progress; it cannot fire while blocked inside a native call). Low disk
+    /// stops GRACEFULLY: the current file finalizes cleanly and AutoStopReason tells
+    /// the UI why.
+    /// </summary>
+    private void EnforceResourceLimits()
+    {
+        long now = QpcClock.GetTimestamp100Ns();
+        if (now - _lastResourceCheck100Ns < MemoryCheckInterval100Ns)
+        {
+            return;
+        }
+        _lastResourceCheck100Ns = now;
 
         using var currentProcess = System.Diagnostics.Process.GetCurrentProcess();
         long privateBytes = currentProcess.PrivateMemorySize64;
@@ -419,6 +516,14 @@ public sealed class RecordingSession : IDisposable
             throw new InvalidOperationException(
                 $"Recording aborted by memory fail-safe: private memory {privateBytes / (1024 * 1024)} MB " +
                 "indicates a stalled encoding pipeline.");
+        }
+
+        var drive = new DriveInfo(Path.GetPathRoot(OutputFilePath)!);
+        if (drive.AvailableFreeSpace < (long)_settings.MinFreeDiskGb * 1024 * 1024 * 1024)
+        {
+            AutoStopReason = $"Free disk space fell below {_settings.MinFreeDiskGb} GB";
+            _log.Warning("{Reason}; stopping recording gracefully", AutoStopReason);
+            _stopRequested = true;
         }
     }
 

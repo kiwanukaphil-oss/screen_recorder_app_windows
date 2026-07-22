@@ -54,6 +54,18 @@ internal static class Program
         {
             settings.MicrophoneVolumePercent = micVolume;
         }
+        if (ReadIntOption(args, "--split-seconds") is int splitSeconds)
+        {
+            settings.SplitMaxDurationSeconds = splitSeconds;
+        }
+        if (ReadIntOption(args, "--split-mb") is int splitMb)
+        {
+            settings.SplitMaxSizeMb = splitMb;
+        }
+        if (args.Contains("--no-crash-safe"))
+        {
+            settings.CrashSafeContainer = false;
+        }
         string outputDirectory = ReadStringOption(args, "--output") ?? settings.OutputDirectory;
         Directory.CreateDirectory(outputDirectory);
 
@@ -113,30 +125,68 @@ internal static class Program
 
         if (seconds is not int)
         {
-            var enterThread = new Thread(() => { Console.ReadLine(); stopSignal.Set(); })
+            // Interactive: P toggles pause, Enter/Q stops.
+            var keyThread = new Thread(() =>
+            {
+                while (true)
+                {
+                    ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+                    if (key.Key is ConsoleKey.Enter or ConsoleKey.Q)
+                    {
+                        stopSignal.Set();
+                        return;
+                    }
+                    if (key.Key is ConsoleKey.P)
+                    {
+                        if (session.IsPaused) { session.Resume(); } else { session.Pause(); }
+                    }
+                }
+            })
             {
                 IsBackground = true,
             };
-            enterThread.Start();
+            keyThread.Start();
         }
 
+        // Test-automation hooks used by the pause/resume integration test.
+        int? pauseAt = ReadIntOption(Environment.GetCommandLineArgs(), "--pause-at");
+        int? resumeAt = ReadIntOption(Environment.GetCommandLineArgs(), "--resume-at");
+
         // Waits in short slices so a mux-thread failure (e.g. the memory fail-safe
-        // tripping) ends the recording promptly instead of after the full duration.
+        // tripping) or a graceful auto-stop ends the recording promptly.
+        DateTime started = DateTime.UtcNow;
         DateTime deadline = seconds is int limit
-            ? DateTime.UtcNow.AddSeconds(limit)
+            ? started.AddSeconds(limit)
             : DateTime.MaxValue;
-        while (!stopSignal.Wait(TimeSpan.FromMilliseconds(500)))
+        while (!stopSignal.Wait(TimeSpan.FromMilliseconds(250)))
         {
-            if (session.HasFailed || DateTime.UtcNow >= deadline)
+            double elapsed = (DateTime.UtcNow - started).TotalSeconds;
+            if (pauseAt is int p && !session.IsPaused && elapsed >= p && (resumeAt is not int r0 || elapsed < r0))
+            {
+                session.Pause();
+            }
+            if (resumeAt is int r && session.IsPaused && elapsed >= r)
+            {
+                session.Resume();
+            }
+            if (session.HasFailed || session.AutoStopReason is not null || DateTime.UtcNow >= deadline)
             {
                 break;
             }
         }
 
         session.Stop();
+        if (session.AutoStopReason is not null)
+        {
+            log.Warning("Recording auto-stopped: {Reason}", session.AutoStopReason);
+        }
 
-        var fileInfo = new FileInfo(outputFile);
-        log.Information("Wrote {File} ({Size:0.0} MB)", fileInfo.FullName, fileInfo.Length / 1_048_576.0);
+        foreach (string producedFile in session.OutputFiles)
+        {
+            var fileInfo = new FileInfo(producedFile);
+            log.Information("Wrote {File} ({Size:0.0} MB)", fileInfo.FullName,
+                fileInfo.Exists ? fileInfo.Length / 1_048_576.0 : 0);
+        }
         log.Information("Frames: {Written} written / {Dropped} dropped; audio chunks: {Audio}; silence gaps: {Gaps}",
             session.Statistics.FramesWritten, session.Statistics.FramesDropped,
             session.Statistics.AudioChunksWritten, session.Statistics.SilenceGapsFilled);

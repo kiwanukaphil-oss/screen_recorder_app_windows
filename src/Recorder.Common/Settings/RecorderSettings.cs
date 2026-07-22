@@ -40,6 +40,22 @@ public sealed class RecorderSettings
 
     public int MicrophoneVolumePercent { get; set; } = 100;
 
+    /// <summary>
+    /// Write fragmented MP4 so a crash/power loss leaves a playable file. Limitation:
+    /// supports one audio track — with mic AND system audio enabled the session falls
+    /// back to a standard MP4 and logs a warning.
+    /// </summary>
+    public bool CrashSafeContainer { get; set; } = true;
+
+    /// <summary>Start a new file after this many seconds of recording (null = never).</summary>
+    public int? SplitMaxDurationSeconds { get; set; }
+
+    /// <summary>Start a new file when the current one exceeds this size (null = never).</summary>
+    public int? SplitMaxSizeMb { get; set; }
+
+    /// <summary>Stop recording gracefully when free disk space falls below this.</summary>
+    public int MinFreeDiskGb { get; set; } = 2;
+
     public bool CaptureCursor { get; set; } = true;
 
     public bool VerboseLogging { get; set; }
