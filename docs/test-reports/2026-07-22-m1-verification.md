@@ -30,7 +30,7 @@ Raw evidence: [data/](data/) (memory CSVs, sync event timestamps, NVENC utilizat
 | Output folder selection | **Partial** — CLI `--output` only; picker UI deferred with the window |
 | Fixed sensible defaults | **Passed** |
 | Synthetic moving-scene validation (duration/fps/res/gaps) | **Passed** (§5) |
-| A/V sync offset < 40 ms | **Inconclusive** — measured −80 ms including player-side bias (§2) |
+| A/V sync offset < 40 ms | **Passed** — +8.8 ms mean via player-free probe (§7) |
 | A/V duration lock over long recordings | **Passed** — Δ7 ms over 2 h (§6) |
 | 1-hour 4K30 recording plays flawlessly | **Passed instrumentally** (§4); human playback check pending (owner) |
 | 10-min 1080p60 game recording | **Not run** (needs a game session; owner) |
@@ -153,11 +153,32 @@ plateau under both idle and active workloads. Note the roadmap wording "flat
 memory" is interpreted as "bounded after warm-up" — warm-up allocation to ~450 MB
 happens over the first ~30 min.
 
+## 7. Player-free A/V sync probe (build `bf8da58` + probe tool)
+
+`Recorder.SyncProbe` records its own fullscreen D3D11 flash window with an
+in-process RecordingSession while submitting 1 kHz beeps to WASAPI, flash and beep
+issued from the same QPC read — no media player in the chain. The session's
+published base timestamp converts each event's QPC time to a position on the
+recording timeline; ffmpeg blackdetect/silencedetect find where the flash/beep
+actually landed. Measurement uncertainty ≈ one display refresh (16.7 ms) + the
+20 ms audio render buffer.
+
+Result over 10 events:
+
+| Metric | Mean | Range |
+|---|---|---|
+| Video-path latency (flash: detected − ground truth) | +5.1 ms | −8…+13 ms |
+| Audio-path latency (beep: detected − ground truth) | −3.6 ms | −7…+3 ms |
+| **A/V skew (video − audio)** | **+8.8 ms** | −4…+16 ms |
+
+**The < 40 ms criterion PASSES.** The −80 ms measured by the §2 clapper method was
+dominated by ffplay's own display-path latency, not by the recorder. No calibration
+offset is needed; §2's method is retired in favor of this probe.
+
 ## Verdict
 
-**The silent-audio regression is verified fixed on NVIDIA hardware; sustained-30fps
-throughput, hardware encoding, the 2-hour soak with confirmed memory plateau, and
-Δ7 ms A/V duration lock over 2 hours are all demonstrated. Full M1 acceptance
-remains open on:** A/V sync absolute offset (inconclusive, M2 probe), AMD/Intel +
-software-fallback coverage, game recording, human playback check, and the owner's
-decision on the deferred minimal window.
+**All machine-testable M1 criteria now pass on NVIDIA hardware**, including the
+2-hour soak with confirmed memory plateau, Δ7 ms A/V duration lock over 2 hours,
+and +8.8 ms absolute A/V sync via the player-free probe. **Full M1 acceptance
+remains open on:** AMD/Intel + software-fallback coverage, game recording, human
+playback check, and the owner's decision on the deferred minimal window.

@@ -155,6 +155,13 @@ public sealed class RecordingSession : IDisposable
     /// <summary>True once the mux thread has failed; the recording should be stopped promptly.</summary>
     public bool HasFailed => _muxThreadFailure is not null;
 
+    /// <summary>
+    /// QPC time (100 ns) of the recording's t = 0, set by Start(). Lets measurement
+    /// tools (the A/V sync probe) convert their own QPC event times into positions on
+    /// the recording's timeline.
+    /// </summary>
+    public long BaseTimestamp100Ns => _baseTimestamp100Ns;
+
     public RecordingSession(
         D3D11GraphicsDevice graphicsDevice,
         RecorderSettings settings,
