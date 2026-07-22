@@ -32,7 +32,7 @@ Raw evidence: [data/](data/) (memory CSVs, sync event timestamps, NVENC utilizat
 | Synthetic moving-scene validation (duration/fps/res/gaps) | **Passed** (§5) |
 | A/V sync offset < 40 ms | **Passed** — +8.8 ms mean via player-free probe (§7) |
 | A/V duration lock over long recordings | **Passed** — Δ7 ms over 2 h (§6) |
-| 1-hour 4K30 recording plays flawlessly | **Passed instrumentally** (§4); human playback check pending (owner) |
+| 1-hour 4K30 recording plays flawlessly | **Passed** — instrumental (§4) + owner playback check via the WinUI shell, 2026-07-22: picture, audio, sync and seeking confirmed good |
 | 10-min 1080p60 game recording | **Not run** (needs a game session; owner) |
 
 ## 1. Functional recording test (build A)
@@ -180,5 +180,6 @@ offset is needed; §2's method is retired in favor of this probe.
 **All machine-testable M1 criteria now pass on NVIDIA hardware**, including the
 2-hour soak with confirmed memory plateau, Δ7 ms A/V duration lock over 2 hours,
 and +8.8 ms absolute A/V sync via the player-free probe. **Full M1 acceptance
-remains open on:** AMD/Intel + software-fallback coverage, game recording, human
-playback check, and the owner's decision on the deferred minimal window.
+remains open on:** AMD/Intel + software-fallback coverage and game recording.
+The human playback check passed via the WinUI shell (which also closes the
+minimal-window deferral — the app now has a real window).

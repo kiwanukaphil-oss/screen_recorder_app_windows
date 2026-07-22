@@ -17,7 +17,12 @@ public enum RateControlMode
     ConstantQuality,
 }
 
-/// <summary>Resolved video encoding parameters for one recording (no "auto" values left).</summary>
+/// <summary>
+/// Resolved video encoding parameters for one recording (no "auto" values left).
+/// Width/Height are the OUTPUT dimensions; when they differ from
+/// SourceWidth/SourceHeight (capture size), the sink writer's GPU video processor
+/// scales during the existing color-convert pass — no extra cost.
+/// </summary>
 public sealed record VideoEncodingConfig(
     int Width,
     int Height,
@@ -26,8 +31,17 @@ public sealed record VideoEncodingConfig(
     VideoCodec Codec = VideoCodec.H264,
     RateControlMode RateControl = RateControlMode.Default,
     int QualityLevel = 70,
-    int KeyframeIntervalSeconds = 2)
+    int KeyframeIntervalSeconds = 2,
+    int SourceWidth = 0,
+    int SourceHeight = 0)
 {
+    /// <summary>Capture-side dimensions; default (0) means same as output.</summary>
+    public int EffectiveSourceWidth => SourceWidth > 0 ? SourceWidth : Width;
+    public int EffectiveSourceHeight => SourceHeight > 0 ? SourceHeight : Height;
+
+    /// <summary>H.264/HEVC require even dimensions; scaling can produce odd values.</summary>
+    public static int AlignEven(int value) => Math.Max(2, value & ~1);
+
     /// <summary>
     /// Default bitrate heuristic: ~0.09 bits per pixel per frame gives visually clean
     /// H.264 for desktop/game content (≈45 Mbps at 4K60), clamped to sane bounds.

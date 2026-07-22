@@ -42,6 +42,18 @@ internal static class Program
         {
             settings.QualityLevel = quality;
         }
+        if (ReadIntOption(args, "--scale") is int scalePercent)
+        {
+            settings.OutputScalePercent = scalePercent;
+        }
+        if (ReadIntOption(args, "--system-volume") is int systemVolume)
+        {
+            settings.SystemAudioVolumePercent = systemVolume;
+        }
+        if (ReadIntOption(args, "--mic-volume") is int micVolume)
+        {
+            settings.MicrophoneVolumePercent = micVolume;
+        }
         string outputDirectory = ReadStringOption(args, "--output") ?? settings.OutputDirectory;
         Directory.CreateDirectory(outputDirectory);
 

@@ -125,15 +125,18 @@ public sealed class Mp4SinkWriter : IDisposable
         }
         int streamIndex = _writer.AddStream(outputType);
 
+        // Input type describes what capture delivers; when its size differs from the
+        // output type's, the GPU video processor scales during the same pass it uses
+        // for BGRA -> NV12 conversion.
         using IMFMediaType inputType = MediaFactory.MFCreateMediaType();
         inputType.Set(MediaTypeAttributeKeys.MajorType, MediaTypeGuids.Video);
         inputType.Set(MediaTypeAttributeKeys.Subtype, VideoFormatGuids.Rgb32);
         inputType.Set(MediaTypeAttributeKeys.InterlaceMode, InterlaceModeProgressive);
-        inputType.Set(MediaTypeAttributeKeys.FrameSize, Pack(video.Width, video.Height));
+        inputType.Set(MediaTypeAttributeKeys.FrameSize, Pack(video.EffectiveSourceWidth, video.EffectiveSourceHeight));
         inputType.Set(MediaTypeAttributeKeys.FrameRate, Pack(video.FramesPerSecond, 1));
         inputType.Set(MediaTypeAttributeKeys.PixelAspectRatio, Pack(1, 1));
         inputType.Set(MediaTypeAttributeKeys.AllSamplesIndependent, 1u);
-        inputType.Set(MediaTypeAttributeKeys.DefaultStride, (uint)(video.Width * 4));
+        inputType.Set(MediaTypeAttributeKeys.DefaultStride, (uint)(video.EffectiveSourceWidth * 4));
         _writer.SetInputMediaType(streamIndex, inputType, null);
 
         return streamIndex;

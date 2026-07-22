@@ -52,6 +52,9 @@ public sealed class RecordingSession : IDisposable
         public required IAudioCaptureSource Source { get; init; }
         public required int TrackIndex { get; init; }
 
+        /// <summary>Linear gain applied on the mux thread (1.0 = unity, 0 = mute).</summary>
+        public required float Gain { get; init; }
+
         /// <summary>Capture thread: copy the transient buffer and queue it (never blocks).</summary>
         public void EnqueueChunk(byte[] pcm, int byteCount, long relativeTimestamp100Ns)
         {
@@ -81,6 +84,7 @@ public sealed class RecordingSession : IDisposable
                     WriteSilence(sink, gap, statistics);
                 }
 
+                ApplyGainInPlace(chunk.Pcm);
                 sink.WriteAudioChunk(TrackIndex, chunk.Pcm, chunk.Pcm.Length, _nextTimestamp100Ns);
                 _nextTimestamp100Ns += chunk.Pcm.Length * 10_000_000L / Source.BytesPerSecond;
                 statistics.OnAudioChunkWritten();
@@ -111,6 +115,23 @@ public sealed class RecordingSession : IDisposable
         }
 
         public bool IsEmpty => _queue.Count == 0;
+
+        /// <summary>
+        /// Scales 32-bit float samples in place with clipping. Runs on the mux thread
+        /// (not the capture callback) so a slow volume ramp can never delay capture.
+        /// </summary>
+        private void ApplyGainInPlace(byte[] pcm)
+        {
+            if (Math.Abs(Gain - 1f) < 0.001f)
+            {
+                return;
+            }
+            Span<float> samples = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(pcm);
+            for (int i = 0; i < samples.Length; i++)
+            {
+                samples[i] = Math.Clamp(samples[i] * Gain, -1f, 1f);
+            }
+        }
 
         private void WriteSilence(Mp4SinkWriter sink, long duration100Ns, RecordingStatistics statistics)
         {
@@ -177,25 +198,25 @@ public sealed class RecordingSession : IDisposable
 
         _captureSource = new ContinuousMonitorCaptureSource(graphicsDevice, monitor, settings.CaptureCursor);
 
-        var sources = new List<IAudioCaptureSource>();
+        var sources = new List<(IAudioCaptureSource Source, float Gain)>();
         if (recordSystemAudio)
         {
-            sources.Add(new SystemAudioLoopbackSource());
+            sources.Add((new SystemAudioLoopbackSource(), settings.SystemAudioVolumePercent / 100f));
         }
         if (recordMicrophone)
         {
             try
             {
-                sources.Add(new MicrophoneCaptureSource());
+                sources.Add((new MicrophoneCaptureSource(), settings.MicrophoneVolumePercent / 100f));
             }
             catch (Exception ex)
             {
                 _log.Warning(ex, "No usable microphone; recording continues without a mic track");
             }
         }
-        foreach ((IAudioCaptureSource source, int index) in sources.Select((s, i) => (s, i)))
+        foreach (((IAudioCaptureSource source, float gain), int index) in sources.Select((s, i) => (s, i)))
         {
-            _audioTracks.Add(new AudioTrackPipeline { Source = source, TrackIndex = index });
+            _audioTracks.Add(new AudioTrackPipeline { Source = source, TrackIndex = index, Gain = gain });
         }
 
         VideoCodec codec = settings.Codec == VideoCodecPreference.Hevc ? VideoCodec.Hevc : VideoCodec.H264;
@@ -206,19 +227,24 @@ public sealed class RecordingSession : IDisposable
             "cq" => RateControlMode.ConstantQuality,
             _ => RateControlMode.Default,
         };
+        int scalePercent = Math.Clamp(settings.OutputScalePercent, 25, 100);
+        int outputWidth = VideoEncodingConfig.AlignEven(_captureSource.Width * scalePercent / 100);
+        int outputHeight = VideoEncodingConfig.AlignEven(_captureSource.Height * scalePercent / 100);
         int bitrate = settings.VideoBitrateKbps is int kbps
             ? kbps * 1000
-            : VideoEncodingConfig.AutoBitrate(_captureSource.Width, _captureSource.Height, settings.FramesPerSecond, codec);
+            : VideoEncodingConfig.AutoBitrate(outputWidth, outputHeight, settings.FramesPerSecond, codec);
 
         var videoConfig = new VideoEncodingConfig(
-            _captureSource.Width,
-            _captureSource.Height,
+            outputWidth,
+            outputHeight,
             settings.FramesPerSecond,
             bitrate,
             codec,
             rateControl,
             settings.QualityLevel,
-            settings.KeyframeIntervalSeconds);
+            settings.KeyframeIntervalSeconds,
+            SourceWidth: _captureSource.Width,
+            SourceHeight: _captureSource.Height);
 
         _framePacer = new FramePacer(settings.FramesPerSecond);
         _sinkWriter = new Mp4SinkWriter(

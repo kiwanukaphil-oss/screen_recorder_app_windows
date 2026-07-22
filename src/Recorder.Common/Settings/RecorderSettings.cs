@@ -32,6 +32,14 @@ public sealed class RecorderSettings
 
     public int KeyframeIntervalSeconds { get; set; } = 2;
 
+    /// <summary>Output resolution as a percentage of capture size (100 = native, 50 = half). GPU-scaled.</summary>
+    public int OutputScalePercent { get; set; } = 100;
+
+    /// <summary>Linear gain per source: 100 = unity, 200 = +6 dB, 0 = mute.</summary>
+    public int SystemAudioVolumePercent { get; set; } = 100;
+
+    public int MicrophoneVolumePercent { get; set; } = 100;
+
     public bool CaptureCursor { get; set; } = true;
 
     public bool VerboseLogging { get; set; }
