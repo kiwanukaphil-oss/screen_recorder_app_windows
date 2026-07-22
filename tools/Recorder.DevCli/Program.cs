@@ -134,7 +134,7 @@ internal static class Program
 
         using RecordingSession session = CreateSession();
         using var stopSignal = new ManualResetEventSlim();
-        using var hotkey = new GlobalStopHotkey(stopSignal.Set);
+        using var hotkey = new GlobalHotkey("Ctrl+Shift+F9", stopSignal.Set);
         log.Information(hotkey.RegistrationSucceeded
             ? "Stop with Ctrl+Shift+F9 (global) or Enter"
             : "Global hotkey unavailable; stop with Enter");
