@@ -83,11 +83,27 @@ the entire run (0 real audio chunks), i.e. soak #1's fatal scenario end to end.
 | Working set | ~160 MB flat |
 | Output | 794 MB MP4, validates in ffprobe, watchdog never triggered |
 
+## 5. Exit-gate recording (1 hour, 4K30)
+
+Unattended 1-hour recording during normal machine use (mixed real audio and
+silence), 60 s sampling, watchdog armed for memory > 8 GB or free disk < 8 GB.
+
+**PASSED:**
+
+| Metric | Result |
+|---|---|
+| Duration | 3600.23 s video / 3600.43 s audio — tracks matched over a full hour |
+| Frames | 31,368 written, **0 dropped** |
+| Audio | 28,639 real chunks + 11,829 silence fills (alternating audio/silence handled) |
+| Private memory | peak 598 MB, mean 478 MB over 60 samples — flat for the entire hour |
+| Output | 3.45 GB MP4, validates in ffprobe; watchdog never triggered |
+
 ## Verdict
 
-M1 engine verified for desktop-length recordings on NVIDIA hardware. Remaining
-exit-gate items: 1-hour recording, AMD/Intel encoder machine, owner sign-off on the
-deferred minimal window (CLI + global hotkey stands in until the M4 UI).
+M1 engine verified on NVIDIA hardware, including the 1-hour exit-gate recording.
+Remaining exit-gate items (owner): second Windows 11 machine (ideally AMD/Intel GPU
+for the encoder-vendor criterion), human playback check of a recording, sign-off on
+the deferred minimal window (CLI + global hotkey stands in until the M4 UI).
 
 ## Known gaps deferred inside M1
 
