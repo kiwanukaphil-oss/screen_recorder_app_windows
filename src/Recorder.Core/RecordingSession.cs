@@ -126,7 +126,7 @@ public sealed class RecordingSession : IDisposable
             {
                 return;
             }
-            Span<float> samples = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(pcm);
+            Span<float> samples = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(pcm.AsSpan());
             for (int i = 0; i < samples.Length; i++)
             {
                 samples[i] = Math.Clamp(samples[i] * Gain, -1f, 1f);
