@@ -1,0 +1,26 @@
+# Build output
+bin/
+obj/
+artifacts/
+*.binlog
+
+# IDE
+.vs/
+.idea/
+*.user
+*.suo
+
+# Test / bench output
+TestResults/
+BenchmarkDotNet.Artifacts/
+*.trx
+
+# Local recordings & temp media produced during testing
+recordings/
+*.mp4
+*.mkv
+*.mov
+
+# Packages
+*.nupkg
+packages/
