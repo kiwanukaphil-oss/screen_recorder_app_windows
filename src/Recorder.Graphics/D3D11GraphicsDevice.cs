@@ -45,6 +45,13 @@ public sealed class D3D11GraphicsDevice : IDisposable
         Device = device!;
         Context = Device.ImmediateContext;
 
+        // The one device is shared by the WGC capture thread and Media Foundation's
+        // encoder threads; D3D11 contexts are not thread-safe without this.
+        using (ID3D11Multithread multithread = Device.QueryInterface<ID3D11Multithread>())
+        {
+            multithread.SetMultithreadProtected(true);
+        }
+
         using IDXGIDevice dxgiDevice = Device.QueryInterface<IDXGIDevice>();
         WinRtDevice = Direct3D11Interop.CreateWinRtDevice(dxgiDevice);
     }

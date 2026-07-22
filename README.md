@@ -10,7 +10,8 @@ A lightweight, professional Windows screen recorder targeting visually lossless 
 
 ## Status
 
-Planning phase. No code yet — implementation begins with milestone M0 (see roadmap).
+- **M0 (foundation)** — complete: solution skeleton, D3D11/WGC interop, screenshot PoC verified at 4K, unit tests, CI.
+- **M1 (MVP recorder)** — engine working: monitor → H.264 (hardware) → MP4 with AAC system audio, verified with ffprobe. Run it with `dotnet run --project tools/Recorder.DevCli` (stop with Ctrl+Shift+F9 or Enter). Remaining M1 items: A/V sync measurement, long-session soak, minimal UI window.
 
 ## Stack (summary)
 
