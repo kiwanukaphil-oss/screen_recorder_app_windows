@@ -79,18 +79,26 @@ internal static class Program
         session.Start();
         log.Information("Recording started");
 
-        if (seconds is int limit)
-        {
-            stopSignal.Wait(TimeSpan.FromSeconds(limit));
-        }
-        else
+        if (seconds is not int)
         {
             var enterThread = new Thread(() => { Console.ReadLine(); stopSignal.Set(); })
             {
                 IsBackground = true,
             };
             enterThread.Start();
-            stopSignal.Wait();
+        }
+
+        // Waits in short slices so a mux-thread failure (e.g. the memory fail-safe
+        // tripping) ends the recording promptly instead of after the full duration.
+        DateTime deadline = seconds is int limit
+            ? DateTime.UtcNow.AddSeconds(limit)
+            : DateTime.MaxValue;
+        while (!stopSignal.Wait(TimeSpan.FromMilliseconds(500)))
+        {
+            if (session.HasFailed || DateTime.UtcNow >= deadline)
+            {
+                break;
+            }
         }
 
         session.Stop();

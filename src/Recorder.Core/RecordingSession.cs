@@ -30,6 +30,17 @@ public sealed class RecordingSession : IDisposable
     // plugged with silence so the AAC track stays continuous and players keep sync.
     private const long AudioGapThreshold100Ns = 500_000; // 50 ms
 
+    // How far the synthesized-silence audio clock is allowed to trail the video clock.
+    // The sink writer buffers video in RAM while audio lags (it must interleave the
+    // streams), so this bound is what keeps memory flat when the system is silent —
+    // an unbounded lag once ballooned commit memory to 29 GB and took the machine down.
+    private const long MaxAudioLagBehindVideo100Ns = 2_000_000; // 200 ms
+
+    // Fail-safe: if private (commit) memory crosses this, something is stalling the
+    // pipeline and the recording aborts cleanly instead of exhausting the pagefile.
+    private const long PrivateMemoryCeilingBytes = 4L * 1024 * 1024 * 1024;
+    private const long MemoryCheckInterval100Ns = 20_000_000; // 2 s
+
     private readonly record struct PendingVideoFrame(ID3D11Texture2D Texture, long Timestamp100Ns);
     private readonly record struct PendingAudioChunk(byte[] Pcm, long Timestamp100Ns);
 
@@ -43,13 +54,19 @@ public sealed class RecordingSession : IDisposable
     private readonly SemaphoreSlim _workAvailable = new(0);
     private readonly Thread _muxThread;
 
+    private readonly FramePacer _framePacer;
     private long _baseTimestamp100Ns;
     private long _nextAudioTimestamp100Ns = -1;
+    private long _latestVideoTimestamp100Ns;
+    private long _lastMemoryCheck100Ns;
     private volatile bool _stopRequested;
     private Exception? _muxThreadFailure;
 
     public RecordingStatistics Statistics { get; } = new();
     public string OutputFilePath { get; }
+
+    /// <summary>True once the mux thread has failed; the recording should be stopped promptly.</summary>
+    public bool HasFailed => _muxThreadFailure is not null;
 
     public RecordingSession(
         D3D11GraphicsDevice graphicsDevice,
@@ -78,6 +95,7 @@ public sealed class RecordingSession : IDisposable
             settings.FramesPerSecond,
             VideoEncodingConfig.AutoBitrate(_captureSource.Width, _captureSource.Height, settings.FramesPerSecond));
 
+        _framePacer = new FramePacer(settings.FramesPerSecond);
         _sinkWriter = new Mp4SinkWriter(outputFilePath, graphicsDevice.Device, videoConfig, audioFormat);
         _muxThread = new Thread(RunMuxLoop)
         {
@@ -130,11 +148,15 @@ public sealed class RecordingSession : IDisposable
             Statistics.AudioChunksWritten, Statistics.SilenceGapsFilled);
     }
 
-    /// <summary>WGC thread: re-base the timestamp and queue the owned texture for the mux thread.</summary>
+    /// <summary>
+    /// WGC thread: re-base the timestamp, pace frames down to the configured FPS
+    /// (see <see cref="FramePacer"/> for why over-delivery is dangerous), and queue
+    /// the owned texture for the mux thread.
+    /// </summary>
     private void HandleFrameReady(ID3D11Texture2D ownedTexture, long timestamp100Ns)
     {
         long relative = timestamp100Ns - _baseTimestamp100Ns;
-        if (relative < 0 || _stopRequested)
+        if (relative < 0 || _stopRequested || !_framePacer.ShouldAccept(relative))
         {
             ownedTexture.Dispose();
             return;
@@ -181,6 +203,7 @@ public sealed class RecordingSession : IDisposable
                 {
                     using ID3D11Texture2D texture = frame.Texture;
                     _sinkWriter.WriteVideoFrame(texture, frame.Timestamp100Ns);
+                    _latestVideoTimestamp100Ns = frame.Timestamp100Ns;
                     Statistics.OnFrameWritten();
                 }
 
@@ -188,6 +211,9 @@ public sealed class RecordingSession : IDisposable
                 {
                     WriteAudioWithGapFill(chunk);
                 }
+
+                KeepAudioClockUpWithVideo();
+                EnforceMemoryCeiling();
 
                 if (_stopRequested && _videoQueue.Count == 0 && _audioQueue.Count == 0)
                 {
@@ -236,6 +262,75 @@ public sealed class RecordingSession : IDisposable
         _sinkWriter.WriteAudioChunk(chunk.Pcm, chunk.Pcm.Length, _nextAudioTimestamp100Ns);
         _nextAudioTimestamp100Ns += chunk.Pcm.Length * 10_000_000L / bytesPerSecond;
         Statistics.OnAudioChunkWritten();
+    }
+
+    /// <summary>
+    /// THE lesson of the first soak test: WASAPI loopback delivers NOTHING while the
+    /// system is silent, and if the audio stream's clock stands still the sink writer
+    /// buffers every incoming raw 4K frame in RAM waiting to interleave the streams
+    /// (~100 MB/s until the machine dies). So the audio clock is driven from the mux
+    /// loop itself: whenever written audio trails written video by more than the
+    /// allowed lag, the difference is filled with synthesized silence — chunk arrival
+    /// is no longer required for the audio timeline to advance.
+    /// </summary>
+    private void KeepAudioClockUpWithVideo()
+    {
+        if (_audioSource is null)
+        {
+            return;
+        }
+
+        long target = _latestVideoTimestamp100Ns - MaxAudioLagBehindVideo100Ns;
+        if (_nextAudioTimestamp100Ns < 0)
+        {
+            if (target <= 0)
+            {
+                return;
+            }
+            _nextAudioTimestamp100Ns = 0;
+        }
+
+        long gap = target - _nextAudioTimestamp100Ns;
+        if (gap <= 0)
+        {
+            return;
+        }
+
+        int bytesPerSecond = _audioSource.BytesPerSecond;
+        int silenceBytes = (int)(gap * bytesPerSecond / 10_000_000L);
+        silenceBytes -= silenceBytes % (_audioSource.Channels * 4);
+        if (silenceBytes <= 0)
+        {
+            return;
+        }
+
+        _sinkWriter.WriteAudioChunk(new byte[silenceBytes], silenceBytes, _nextAudioTimestamp100Ns);
+        _nextAudioTimestamp100Ns += silenceBytes * 10_000_000L / bytesPerSecond;
+        Statistics.OnSilenceGapFilled();
+    }
+
+    /// <summary>
+    /// Cheap watchdog (checked every ~2 s of media time): if commit memory crosses the
+    /// ceiling, some stage is hoarding samples — abort the recording with a clear error
+    /// instead of exhausting the pagefile and destabilizing the whole machine.
+    /// </summary>
+    private void EnforceMemoryCeiling()
+    {
+        long now = QpcClock.GetTimestamp100Ns();
+        if (now - _lastMemoryCheck100Ns < MemoryCheckInterval100Ns)
+        {
+            return;
+        }
+        _lastMemoryCheck100Ns = now;
+
+        using var currentProcess = System.Diagnostics.Process.GetCurrentProcess();
+        long privateBytes = currentProcess.PrivateMemorySize64;
+        if (privateBytes > PrivateMemoryCeilingBytes)
+        {
+            throw new InvalidOperationException(
+                $"Recording aborted by memory fail-safe: private memory {privateBytes / (1024 * 1024)} MB " +
+                "indicates a stalled encoding pipeline.");
+        }
     }
 
     public void Dispose()
