@@ -3,74 +3,391 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <Grid Padding="24" RowSpacing="16">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+    <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <ScrollViewer x:Name="MainScroller"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+            <StackPanel MaxWidth="760"
+                        HorizontalAlignment="Center"
+                        Padding="28,24,28,32"
+                        Spacing="18">
 
-        <TextBlock Grid.Row="0" Text="Screen Recorder"
-                   Style="{StaticResource TitleTextBlockStyle}" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="Screen Recorder"
+                                   Style="{StaticResource TitleTextBlockStyle}" />
+                        <TextBlock Text="Capture beautifully. Stay focused."
+                                   Foreground="{ThemeResource RecorderMutedBrush}" />
+                    </StackPanel>
+                    <Border Grid.Column="1"
+                            VerticalAlignment="Center"
+                            Padding="12,7"
+                            Background="{ThemeResource RecorderCardBrush}"
+                            BorderBrush="{ThemeResource RecorderCardBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="16">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <Ellipse x:Name="StatusDot" Width="8" Height="8"
+                                     VerticalAlignment="Center"
+                                     Fill="{ThemeResource AccentFillColorDefaultBrush}" />
+                            <TextBlock x:Name="StatusPillText" Text="Ready"
+                                       VerticalAlignment="Center" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
 
-        <StackPanel Grid.Row="1" Spacing="8">
-            <TextBlock Text="Source" Style="{StaticResource BodyStrongTextBlockStyle}" />
-            <ComboBox x:Name="SourcePicker" HorizontalAlignment="Stretch"
-                      DropDownOpened="OnSourcePickerOpened" />
-        </StackPanel>
+                <InfoBar x:Name="MessageBar"
+                         IsOpen="False"
+                         IsClosable="True"
+                         Severity="Informational" />
 
-        <Grid Grid.Row="2" ColumnSpacing="16">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0" Spacing="8">
-                <TextBlock Text="Audio" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                <ToggleSwitch x:Name="SystemAudioToggle" Header="System audio" IsOn="True" />
-                <ToggleSwitch x:Name="MicrophoneToggle" Header="Microphone" IsOn="False" />
+                <Border Style="{StaticResource RecorderCardStyle}">
+                    <StackPanel Spacing="14">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="Capture source"
+                                           Style="{StaticResource RecorderSectionTitleStyle}" />
+                                <TextBlock Text="Choose exactly what should be recorded"
+                                           FontSize="12"
+                                           Foreground="{ThemeResource RecorderMutedBrush}" />
+                            </StackPanel>
+                            <Button x:Name="RefreshSourcesButton" Grid.Column="1"
+                                    Width="40" Height="40"
+                                    Padding="0"
+                                    AutomationProperties.Name="Refresh capture sources"
+                                    ToolTipService.ToolTip="Refresh capture sources"
+                                    Click="OnRefreshSourcesClick">
+                                <SymbolIcon Symbol="Refresh" />
+                            </Button>
+                        </Grid>
+
+                        <Border Height="184"
+                                Background="{ThemeResource RecorderPreviewBrush}"
+                                CornerRadius="12">
+                            <StackPanel HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Spacing="10">
+                                <SymbolIcon Symbol="Video" Foreground="White" />
+                                <TextBlock x:Name="PreviewSourceName"
+                                           MaxWidth="560"
+                                           Text="Select a screen or window"
+                                           TextAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="White"
+                                           FontSize="16"
+                                           FontWeight="SemiBold" />
+                                <TextBlock x:Name="PreviewSourceDetails"
+                                           Text="Ready to capture"
+                                           TextAlignment="Center"
+                                           Foreground="#B8FFFFFF"
+                                           FontSize="12" />
+                            </StackPanel>
+                        </Border>
+
+                        <ComboBox x:Name="SourcePicker"
+                                  Header="Selected source"
+                                  HorizontalAlignment="Stretch"
+                                  AutomationProperties.Name="Capture source"
+                                  DropDownOpened="OnSourcePickerOpened"
+                                  SelectionChanged="OnSourceSelectionChanged" />
+                    </StackPanel>
+                </Border>
+
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Style="{StaticResource RecorderCardStyle}">
+                        <StackPanel Spacing="14">
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="Quality"
+                                           Style="{StaticResource RecorderSectionTitleStyle}" />
+                                <TextBlock Text="Smart presets for reliable results"
+                                           FontSize="12"
+                                           Foreground="{ThemeResource RecorderMutedBrush}" />
+                            </StackPanel>
+                            <ComboBox x:Name="QualityPresetPicker"
+                                      Header="Recording profile"
+                                      HorizontalAlignment="Stretch"
+                                      SelectionChanged="OnQualityPresetChanged">
+                                <ComboBoxItem Content="Balanced" Tag="Balanced" />
+                                <ComboBoxItem Content="Efficient" Tag="Efficient" />
+                                <ComboBoxItem Content="Smoothest" Tag="Smoothest" />
+                                <ComboBoxItem Content="Custom" Tag="Custom" />
+                            </ComboBox>
+                            <TextBlock x:Name="QualitySummaryText"
+                                       Text="Native resolution · 60 FPS · H.264"
+                                       TextWrapping="Wrap"
+                                       Foreground="{ThemeResource RecorderMutedBrush}" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Column="1" Style="{StaticResource RecorderCardStyle}">
+                        <StackPanel Spacing="12">
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="Audio"
+                                           Style="{StaticResource RecorderSectionTitleStyle}" />
+                                <TextBlock Text="Default Windows devices"
+                                           FontSize="12"
+                                           Foreground="{ThemeResource RecorderMutedBrush}" />
+                            </StackPanel>
+                            <ToggleSwitch x:Name="SystemAudioToggle"
+                                          Header="System audio"
+                                          Toggled="OnAudioToggleChanged" />
+                            <Slider x:Name="SystemVolumeSlider"
+                                    Header="System volume"
+                                    Minimum="0" Maximum="200" StepFrequency="5"
+                                    ValueChanged="OnVolumeChanged"
+                                    AutomationProperties.Name="System audio volume" />
+                            <ToggleSwitch x:Name="MicrophoneToggle"
+                                          Header="Microphone"
+                                          Toggled="OnAudioToggleChanged" />
+                            <Slider x:Name="MicrophoneVolumeSlider"
+                                    Header="Microphone volume"
+                                    Minimum="0" Maximum="200" StepFrequency="5"
+                                    ValueChanged="OnVolumeChanged"
+                                    AutomationProperties.Name="Microphone volume" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <Border Style="{StaticResource RecorderCardStyle}">
+                    <StackPanel Spacing="12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="Save location"
+                                           Style="{StaticResource RecorderSectionTitleStyle}" />
+                                <TextBlock x:Name="OutputDirectoryText"
+                                           MaxWidth="590"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="{ThemeResource RecorderMutedBrush}" />
+                            </StackPanel>
+                            <Button x:Name="ChooseFolderButton" Grid.Column="1"
+                                    Style="{StaticResource RecorderSecondaryButtonStyle}"
+                                    AutomationProperties.Name="Choose recordings folder"
+                                    Click="OnChooseFolderClick">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <SymbolIcon Symbol="Folder" />
+                                    <TextBlock Text="Choose" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+                        <TextBlock x:Name="StorageSummaryText"
+                                   Text="Checking available storage…"
+                                   FontSize="12"
+                                   Foreground="{ThemeResource RecorderMutedBrush}" />
+                    </StackPanel>
+                </Border>
+
+                <Expander x:Name="AdvancedExpander" Header="Advanced recording settings">
+                    <Grid Padding="0,14,0,2" ColumnSpacing="14" RowSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <ComboBox x:Name="CodecPicker" Grid.Row="0" Grid.Column="0"
+                                  Header="Codec" HorizontalAlignment="Stretch"
+                                  SelectionChanged="OnAdvancedSettingChanged">
+                            <ComboBoxItem Content="H.264" />
+                            <ComboBoxItem Content="HEVC" />
+                        </ComboBox>
+                        <ComboBox x:Name="FpsPicker" Grid.Row="0" Grid.Column="1"
+                                  Header="Frame rate" HorizontalAlignment="Stretch"
+                                  SelectionChanged="OnAdvancedSettingChanged">
+                            <ComboBoxItem Content="30 FPS" Tag="30" />
+                            <ComboBoxItem Content="60 FPS" Tag="60" />
+                            <ComboBoxItem Content="120 FPS" Tag="120" />
+                        </ComboBox>
+                        <ComboBox x:Name="ScalePicker" Grid.Row="1" Grid.Column="0"
+                                  Header="Output size" HorizontalAlignment="Stretch"
+                                  SelectionChanged="OnAdvancedSettingChanged">
+                            <ComboBoxItem Content="Native (100%)" Tag="100" />
+                            <ComboBoxItem Content="Three-quarter (75%)" Tag="75" />
+                            <ComboBoxItem Content="Half (50%)" Tag="50" />
+                        </ComboBox>
+                        <ComboBox x:Name="CountdownPicker" Grid.Row="1" Grid.Column="1"
+                                  Header="Start countdown" HorizontalAlignment="Stretch"
+                                  SelectionChanged="OnPreferenceChanged">
+                            <ComboBoxItem Content="Off" Tag="0" />
+                            <ComboBoxItem Content="3 seconds" Tag="3" />
+                            <ComboBoxItem Content="5 seconds" Tag="5" />
+                        </ComboBox>
+                        <ToggleSwitch x:Name="CaptureCursorToggle" Grid.Row="2" Grid.Column="0"
+                                      Header="Capture cursor"
+                                      Toggled="OnPreferenceChanged" />
+                        <ToggleSwitch x:Name="CrashSafeToggle" Grid.Row="2" Grid.Column="1"
+                                      Header="Crash-safe MP4"
+                                      Toggled="OnPreferenceChanged" />
+                        <ComboBox x:Name="HotkeyPicker" Grid.Row="3" Grid.Column="0"
+                                  Header="Start / stop hotkey"
+                                  HorizontalAlignment="Stretch"
+                                  SelectionChanged="OnPreferenceChanged">
+                            <ComboBoxItem Content="Ctrl+Shift+F9" />
+                            <ComboBoxItem Content="Ctrl+Shift+F11" />
+                            <ComboBoxItem Content="Ctrl+Alt+R" />
+                        </ComboBox>
+                        <ComboBox x:Name="PauseHotkeyPicker" Grid.Row="3" Grid.Column="1"
+                                  Header="Pause / resume hotkey"
+                                  HorizontalAlignment="Stretch"
+                                  SelectionChanged="OnPreferenceChanged">
+                            <ComboBoxItem Content="Ctrl+Shift+F10" />
+                            <ComboBoxItem Content="Ctrl+Shift+F12" />
+                            <ComboBoxItem Content="Ctrl+Alt+R" />
+                        </ComboBox>
+                        <ComboBox x:Name="RateControlPicker" Grid.Row="4" Grid.Column="0"
+                                  Header="Quality mode" HorizontalAlignment="Stretch"
+                                  SelectionChanged="OnAdvancedSettingChanged">
+                            <ComboBoxItem Content="Automatic" Tag="default" />
+                            <ComboBoxItem Content="Variable bitrate" Tag="vbr" />
+                            <ComboBoxItem Content="Constant bitrate" Tag="cbr" />
+                            <ComboBoxItem Content="Constant quality" Tag="cq" />
+                        </ComboBox>
+                        <Slider x:Name="QualityLevelSlider" Grid.Row="4" Grid.Column="1"
+                                Header="Constant quality level"
+                                Minimum="1" Maximum="100" StepFrequency="1"
+                                ValueChanged="OnQualityLevelChanged"
+                                AutomationProperties.Name="Constant quality level" />
+                    </Grid>
+                </Expander>
+
+                <StackPanel x:Name="IdleTransportPanel" Spacing="10">
+                    <Button x:Name="StartButton"
+                            Style="{StaticResource RecorderPrimaryButtonStyle}"
+                            Click="OnStartButtonClick"
+                            AutomationProperties.Name="Start recording">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Ellipse Width="13" Height="13" Fill="White" />
+                            <TextBlock x:Name="StartButtonLabel" Text="Start recording" />
+                        </StackPanel>
+                    </Button>
+                    <TextBlock x:Name="ReadySummaryText"
+                               Text="Ctrl+Shift+F9 starts or stops · Ctrl+Shift+F10 pauses or resumes"
+                               HorizontalAlignment="Center"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"
+                               FontSize="12"
+                               Foreground="{ThemeResource RecorderMutedBrush}" />
+                </StackPanel>
+
+                <Border x:Name="RecordingPanel"
+                        Visibility="Collapsed"
+                        Style="{StaticResource RecorderCardStyle}"
+                        Background="{ThemeResource RecorderRecordingSurfaceBrush}"
+                        AutomationProperties.LiveSetting="Assertive">
+                    <StackPanel Spacing="16">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Ellipse x:Name="RecordingDot" Width="12" Height="12"
+                                         VerticalAlignment="Center"
+                                         Fill="{ThemeResource RecorderRecordingBrush}" />
+                                <TextBlock x:Name="RecordingStateText"
+                                           Text="Recording"
+                                           VerticalAlignment="Center"
+                                           FontSize="17" FontWeight="SemiBold" />
+                            </StackPanel>
+                            <TextBlock x:Name="RecordingTimerText" Grid.Column="1"
+                                       Text="00:00:00"
+                                       FontFamily="Consolas"
+                                       FontSize="26" FontWeight="SemiBold" />
+                        </Grid>
+                        <TextBlock x:Name="RecordingStatsText"
+                                   Text="Preparing performance statistics…"
+                                   Foreground="{ThemeResource RecorderMutedBrush}" />
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="PauseButton" Grid.Column="0"
+                                    Height="50" CornerRadius="10"
+                                    Click="OnPauseButtonClick">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <SymbolIcon x:Name="PauseButtonIcon" Symbol="Pause" />
+                                    <TextBlock x:Name="PauseButtonLabel" Text="Pause" />
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="StopButton" Grid.Column="1"
+                                    Height="50" CornerRadius="10"
+                                    Background="{ThemeResource RecorderRecordingBrush}"
+                                    Foreground="White"
+                                    Click="OnStopButtonClick">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <SymbolIcon Symbol="Stop" />
+                                    <TextBlock Text="Stop and save" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border x:Name="ResultPanel"
+                        Visibility="Collapsed"
+                        Style="{StaticResource RecorderCardStyle}"
+                        Background="{ThemeResource RecorderSuccessSurfaceBrush}"
+                        AutomationProperties.LiveSetting="Polite">
+                    <StackPanel Spacing="14">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <SymbolIcon Symbol="Accept"
+                                        Foreground="{ThemeResource RecorderSuccessBrush}" />
+                            <TextBlock x:Name="ResultHeadlineText"
+                                       Text="Recording saved"
+                                       FontSize="17" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <TextBlock x:Name="ResultDetailsText"
+                                   TextWrapping="Wrap"
+                                   Foreground="{ThemeResource RecorderMutedBrush}" />
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Button Style="{StaticResource RecorderSecondaryButtonStyle}"
+                                    Click="OnPlayLatestClick">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <SymbolIcon Symbol="Play" />
+                                    <TextBlock Text="Play" />
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource RecorderSecondaryButtonStyle}"
+                                    Click="OnOpenFolderClick">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <SymbolIcon Symbol="Folder" />
+                                    <TextBlock Text="Show in folder" />
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource RecorderSecondaryButtonStyle}"
+                                    Click="OnCopyPathClick">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <SymbolIcon Symbol="Copy" />
+                                    <TextBlock Text="Copy path" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
             </StackPanel>
-            <StackPanel Grid.Column="1" Spacing="8">
-                <TextBlock Text="Video" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                <ComboBox x:Name="CodecPicker" Header="Codec" HorizontalAlignment="Stretch">
-                    <ComboBoxItem Content="H.264" IsSelected="True" />
-                    <ComboBoxItem Content="HEVC" />
-                </ComboBox>
-                <ComboBox x:Name="FpsPicker" Header="Frame rate" HorizontalAlignment="Stretch">
-                    <ComboBoxItem Content="30" />
-                    <ComboBoxItem Content="60" IsSelected="True" />
-                </ComboBox>
-            </StackPanel>
-        </Grid>
-
-        <Grid Grid.Row="3" ColumnSpacing="12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="2*" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <Button x:Name="RecordButton" Grid.Column="0"
-                    HorizontalAlignment="Stretch" Height="56"
-                    Style="{StaticResource AccentButtonStyle}"
-                    Click="OnRecordButtonClick">
-                <TextBlock x:Name="RecordButtonLabel" Text="● Start recording"
-                           FontSize="18" />
-            </Button>
-            <Button x:Name="PauseButton" Grid.Column="1"
-                    HorizontalAlignment="Stretch" Height="56"
-                    IsEnabled="False"
-                    Click="OnPauseButtonClick">
-                <TextBlock x:Name="PauseButtonLabel" Text="⏸ Pause" FontSize="16" />
-            </Button>
-        </Grid>
-
-        <TextBlock x:Name="StatusText" Grid.Row="4"
-                   Text="Ready. Ctrl+Shift+F9 stops recording from anywhere."
-                   TextWrapping="Wrap"
-                   Style="{StaticResource BodyTextBlockStyle}" />
-
-        <Button Grid.Row="5" HorizontalAlignment="Stretch"
-                Content="Open recordings folder" Click="OnOpenFolderClick" />
+        </ScrollViewer>
     </Grid>
 </Window>

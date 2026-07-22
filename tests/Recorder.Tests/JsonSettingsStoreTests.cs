@@ -28,6 +28,12 @@ public class JsonSettingsStoreTests : IDisposable
             FramesPerSecond = 120,
             Codec = VideoCodecPreference.Hevc,
             OutputDirectory = @"D:\Captures",
+            RecordSystemAudio = false,
+            RecordMicrophone = true,
+            CountdownSeconds = 5,
+            QualityPreset = "Smoothest",
+            StartStopHotkey = "Ctrl+Alt+R",
+            PauseResumeHotkey = "Ctrl+Shift+F10",
         };
 
         store.Save(settings);
@@ -37,6 +43,12 @@ public class JsonSettingsStoreTests : IDisposable
         Assert.Equal(120, reloaded.FramesPerSecond);
         Assert.Equal(VideoCodecPreference.Hevc, reloaded.Codec);
         Assert.Equal(@"D:\Captures", reloaded.OutputDirectory);
+        Assert.False(reloaded.RecordSystemAudio);
+        Assert.True(reloaded.RecordMicrophone);
+        Assert.Equal(5, reloaded.CountdownSeconds);
+        Assert.Equal("Smoothest", reloaded.QualityPreset);
+        Assert.Equal("Ctrl+Alt+R", reloaded.StartStopHotkey);
+        Assert.Equal("Ctrl+Shift+F10", reloaded.PauseResumeHotkey);
     }
 
     [Fact]

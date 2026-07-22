@@ -7,6 +7,66 @@
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
+
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="RecorderCardBrush" Color="#F8FAFC" />
+                    <SolidColorBrush x:Key="RecorderCardBorderBrush" Color="#160F172A" />
+                    <SolidColorBrush x:Key="RecorderPreviewBrush" Color="#101827" />
+                    <SolidColorBrush x:Key="RecorderMutedBrush" Color="#6B7280" />
+                    <SolidColorBrush x:Key="RecorderRecordingBrush" Color="#DC2626" />
+                    <SolidColorBrush x:Key="RecorderRecordingSurfaceBrush" Color="#FFF1F2" />
+                    <SolidColorBrush x:Key="RecorderSuccessBrush" Color="#15803D" />
+                    <SolidColorBrush x:Key="RecorderSuccessSurfaceBrush" Color="#F0FDF4" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="RecorderCardBrush" Color="#B31C2431" />
+                    <SolidColorBrush x:Key="RecorderCardBorderBrush" Color="#25FFFFFF" />
+                    <SolidColorBrush x:Key="RecorderPreviewBrush" Color="#090E17" />
+                    <SolidColorBrush x:Key="RecorderMutedBrush" Color="#9CA3AF" />
+                    <SolidColorBrush x:Key="RecorderRecordingBrush" Color="#FB7185" />
+                    <SolidColorBrush x:Key="RecorderRecordingSurfaceBrush" Color="#392025" />
+                    <SolidColorBrush x:Key="RecorderSuccessBrush" Color="#4ADE80" />
+                    <SolidColorBrush x:Key="RecorderSuccessSurfaceBrush" Color="#163524" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <SolidColorBrush x:Key="RecorderCardBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="RecorderCardBorderBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="RecorderPreviewBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="RecorderMutedBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="RecorderRecordingBrush" Color="{ThemeResource SystemColorHotlightColor}" />
+                    <SolidColorBrush x:Key="RecorderRecordingSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="RecorderSuccessBrush" Color="{ThemeResource SystemColorHotlightColor}" />
+                    <SolidColorBrush x:Key="RecorderSuccessSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
+            <Style x:Key="RecorderCardStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource RecorderCardBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource RecorderCardBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="16" />
+                <Setter Property="Padding" Value="20" />
+            </Style>
+
+            <Style x:Key="RecorderSectionTitleStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="16" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+
+            <Style x:Key="RecorderPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
+                <Setter Property="Height" Value="56" />
+                <Setter Property="CornerRadius" Value="12" />
+                <Setter Property="FontSize" Value="17" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+            </Style>
+
+            <Style x:Key="RecorderSecondaryButtonStyle" TargetType="Button">
+                <Setter Property="MinHeight" Value="44" />
+                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="Padding" Value="16,8" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

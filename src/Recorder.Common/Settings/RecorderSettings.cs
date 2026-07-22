@@ -61,8 +61,21 @@ public sealed class RecorderSettings
 
     public bool CaptureCursor { get; set; } = true;
 
+    /// <summary>User-facing capture preferences kept alongside encoder settings.</summary>
+    public bool RecordSystemAudio { get; set; } = true;
+
+    public bool RecordMicrophone { get; set; }
+
+    /// <summary>Optional preparation countdown. Supported UI values are 0, 3 and 5 seconds.</summary>
+    public int CountdownSeconds { get; set; } = 3;
+
+    /// <summary>Last simple recording profile selected in the app.</summary>
+    public string QualityPreset { get; set; } = "Balanced";
+
     public bool VerboseLogging { get; set; }
 
     /// <summary>Serialized hotkey gesture, e.g. "Ctrl+Shift+F9". Parsed by the hotkey module in M1.</summary>
     public string StartStopHotkey { get; set; } = "Ctrl+Shift+F9";
+
+    public string PauseResumeHotkey { get; set; } = "Ctrl+Shift+F10";
 }

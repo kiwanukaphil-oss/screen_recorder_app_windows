@@ -1,0 +1,99 @@
+<Window
+    x:Class="Recorder.App.RecordingOverlayWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Border x:Name="ControllerSurface"
+            Background="{ThemeResource RecorderCardBrush}"
+            BorderBrush="{ThemeResource RecorderCardBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="14"
+            Padding="14,10"
+            PointerPressed="OnControllerPointerPressed"
+            PointerMoved="OnControllerPointerMoved"
+            PointerReleased="OnControllerPointerReleased"
+            PointerCanceled="OnControllerPointerCanceled"
+            PointerCaptureLost="OnControllerPointerCaptureLost"
+            ToolTipService.ToolTip="Drag anywhere outside the buttons to reposition">
+        <Grid ColumnSpacing="12"
+              Background="Transparent">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <Grid x:Name="DragHandle"
+                  Background="Transparent">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <FontIcon Glyph="&#xE784;"
+                          FontSize="15"
+                          Margin="0,0,10,0"
+                          VerticalAlignment="Center"
+                          Foreground="{ThemeResource RecorderMutedBrush}" />
+                <Ellipse x:Name="StateDot" Grid.Column="1"
+                         Width="11" Height="11"
+                         Margin="0,0,11,0"
+                         VerticalAlignment="Center"
+                         Fill="{ThemeResource RecorderRecordingBrush}" />
+                <StackPanel Grid.Column="2" Spacing="1">
+                    <TextBlock Text="RECORDING TIME"
+                               FontSize="9"
+                               FontWeight="SemiBold"
+                               CharacterSpacing="90"
+                               Foreground="{ThemeResource RecorderMutedBrush}" />
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock x:Name="OverlayTimerText"
+                                   Text="00:00:00"
+                                   FontFamily="Consolas"
+                                   FontSize="24"
+                                   FontWeight="SemiBold"
+                                   AutomationProperties.Name="Recording duration" />
+                        <TextBlock x:Name="OverlayStateText"
+                                   Text="REC"
+                                   VerticalAlignment="Center"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Foreground="{ThemeResource RecorderRecordingBrush}" />
+                    </StackPanel>
+                    <TextBlock x:Name="OverlayHealthText"
+                               Text="No dropped frames"
+                               FontSize="10"
+                               Foreground="{ThemeResource RecorderMutedBrush}" />
+                </StackPanel>
+            </Grid>
+
+            <Button x:Name="OverlayPauseButton" Grid.Column="1"
+                    Width="42" Height="42" Padding="0"
+                    CornerRadius="9"
+                    Click="OnPauseClick"
+                    AutomationProperties.Name="Pause recording"
+                    ToolTipService.ToolTip="Pause or resume">
+                <SymbolIcon x:Name="OverlayPauseIcon" Symbol="Pause" />
+            </Button>
+            <Button x:Name="OverlayStopButton" Grid.Column="2"
+                    Width="42" Height="42" Padding="0"
+                    CornerRadius="9"
+                    Background="{ThemeResource RecorderRecordingBrush}"
+                    Foreground="White"
+                    Click="OnStopClick"
+                    AutomationProperties.Name="Stop and save recording"
+                    ToolTipService.ToolTip="Stop and save">
+                <SymbolIcon Symbol="Stop" />
+            </Button>
+            <Button Grid.Column="3"
+                    Width="36" Height="42" Padding="0"
+                    CornerRadius="9"
+                    Click="OnHideClick"
+                    AutomationProperties.Name="Hide recording controller"
+                    ToolTipService.ToolTip="Hide controller">
+                <SymbolIcon Symbol="Remove" />
+            </Button>
+        </Grid>
+    </Border>
+</Window>
